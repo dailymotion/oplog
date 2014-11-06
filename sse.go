@@ -81,13 +81,17 @@ func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lastId = daemon.ol.LastId()
 	}
 
+	filter := OpLogFilter{
+		Type: r.URL.Query().Get("type"),
+	}
+
 	flusher := w.(http.Flusher)
 	notifier := w.(http.CloseNotifier)
 	ops := make(chan Operation)
 	err := make(chan error)
 	flusher.Flush()
 
-	go daemon.ol.Tail(lastId, ops, err)
+	go daemon.ol.Tail(lastId, filter, ops, err)
 
 	for {
 		select {

@@ -13,6 +13,10 @@ type OpLog struct {
 	s *mgo.Session
 }
 
+type OpLogFilter struct {
+	Type string
+}
+
 type OpLogCollection struct {
 	*mgo.Collection
 }
@@ -142,30 +146,29 @@ func (oplog *OpLog) LastId() string {
 }
 
 // tail creates a tail cursor starting at a given id
-func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId) *mgo.Iter {
-	var query *mgo.Query
+func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId, filter OpLogFilter) *mgo.Iter {
+	query := bson.M{}
+	if filter.Type != "" {
+		query["data.t"] = filter.Type
+	}
 	if lastId == nil {
 		// If no last id provided, find the last operation id in the colleciton
 		lastId = objectId(oplog.LastId())
 	}
 	if lastId != nil {
-		query = c.Find(bson.M{"_id": bson.M{"$gt": lastId}})
-	} else {
-		// If last id is still nil, that means the collection is empty
-		// Read from the begining
-		query = c.Find(nil)
+		query["_id"] = bson.M{"$gt": lastId}
 	}
-	return query.Sort("$natural").Tail(5 * time.Second)
+	return c.Find(query).Sort("$natural").Tail(5 * time.Second)
 }
 
 // Tail tails all the new operations in the oplog and send the operation in
 // the given channel. If the lastId parameter is given, all operation posted after
 // this event will be returned.
-func (oplog *OpLog) Tail(lastId string, out chan<- Operation, err chan<- error) {
+func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- Operation, err chan<- error) {
 	c := oplog.c()
 	operation := Operation{}
 	lastObjectId := objectId(lastId)
-	iter := oplog.tail(c, lastObjectId)
+	iter := oplog.tail(c, lastObjectId, filter)
 
 	for {
 		for iter.Next(&operation) {
@@ -182,6 +185,7 @@ func (oplog *OpLog) Tail(lastId string, out chan<- Operation, err chan<- error) 
 		iter.Close()
 		c.Close()
 		c = oplog.c()
-		iter = oplog.tail(c, lastObjectId)
+		iter = oplog.tail(c, lastObjectId, filter)
+		time.Sleep(time.Second)
 	}
 }
