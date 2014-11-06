@@ -39,3 +39,16 @@ Only xid must be used, numerical ids aren't accepted.
 The SSE API runs on the same port as UDP API but using TCP. The W3C SSE protocol is respected by the book. To connect to the API, the `Accept: text/event-stream` header must be sent.
 
 On each received event, the client must store the last event id and submit it back to the server on reconnect using the `Last-Event-ID` HTTP header. The client must then ensure the `Last-Event-ID` header is sent back in the response. It may happen that the id defined by `Last-Event-ID` is no longer available, in this case, the agent won't send the backlog and will ignore the `Last-Event-ID` header.
+
+## Status Endpoint
+
+The agent exposes a {{/status}} endpoint over HTTP to show some statistics about the agent. A JSON object is returned with the following fields:
+
+* `events_received`: Total number of events recieved on the UDP interface
+* `events_ingested`: Total number of events ingested into MongoDB with success
+* `events_error`: Total number of events received on the UDP interface with an invalid format
+* `events_discarded`: Total number of events discarded because the queue was full
+* `queue_size`: Current number of events in the ingestion queue
+* `queue_max_size`:  Maximum number of events allowed in the ingestion queue before discarding events
+* `clients`: Number of clients connected to the SSE API
+

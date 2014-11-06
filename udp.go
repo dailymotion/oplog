@@ -31,7 +31,7 @@ func NewUDPDaemon(addr string, ol *OpLog) *UDPDaemon {
 // The queueSize parameter defines the number of operation that can be queued before
 // the UDP server start throwing messages. This is particularly important to handle underlaying
 // MongoDB slowdowns or unavalability.
-func (daemon *UDPDaemon) Run(queueSize int) error {
+func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 	udpAddr, err := net.ResolveUDPAddr("udp4", daemon.addr)
 	if err != nil {
 		return err
@@ -42,7 +42,8 @@ func (daemon *UDPDaemon) Run(queueSize int) error {
 		return err
 	}
 
-	ops := make(chan *Operation, queueSize)
+	daemon.ol.Status.QueueMaxSize = queueMaxSize
+	ops := make(chan *Operation, queueMaxSize)
 	go daemon.ol.Ingest(ops)
 
 	operation := &UDPOperation{}
@@ -57,17 +58,21 @@ func (daemon *UDPDaemon) Run(queueSize int) error {
 
 		log.Debugf("UDP received operation from UDP: %s", buffer[:n])
 
-		if len(ops) >= queueSize {
+		daemon.ol.Status.QueueSize = len(ops)
+		if daemon.ol.Status.QueueSize >= queueMaxSize {
 			log.Warnf("UDP input queue is full, thowing message: %s", buffer[:n])
+			daemon.ol.Status.EventsDiscarded++
 			continue
 		}
 
 		err = json.Unmarshal(buffer[:n], operation)
 		if err != nil {
 			log.Warnf("UDP invalid JSON recieved: %s", err)
+			daemon.ol.Status.EventsError++
 			continue
 		}
 
+		daemon.ol.Status.EventsReceived++
 		ops <- &Operation{
 			Event: strings.ToUpper(operation.Event),
 			Data: &OperationData{

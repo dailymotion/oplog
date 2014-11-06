@@ -10,7 +10,26 @@ import (
 )
 
 type OpLog struct {
-	s *mgo.Session
+	s      *mgo.Session
+	Status *OpLogStatus
+}
+
+type OpLogStatus struct {
+	Status string `json:"status"`
+	// Total number of events recieved on the UDP interface
+	EventsReceived int `json:"events_received"`
+	// Total number of events ingested into MongoDB with success
+	EventsIngested int `json:"events_ingested"`
+	// Total number of events received on the UDP interface with an invalid format
+	EventsError int `json:"events_error"`
+	// Total number of events discarded because the queue was full
+	EventsDiscarded int `json:"events_discarded"`
+	// Current number of events in the ingestion queue
+	QueueSize int `json:"queue_size"`
+	// Maximum number of events allowed in the ingestion queue before discarding events
+	QueueMaxSize int `json:"queue_max_size"`
+	// Number of clients connected to the SSE API
+	Clients int `json:"clients"`
 }
 
 type OpLogFilter struct {
@@ -68,7 +87,7 @@ func NewOpLog(mongoURL string, maxBytes int) (*OpLog, error) {
 	if err != nil {
 		return nil, err
 	}
-	oplog := &OpLog{session}
+	oplog := &OpLog{session, &OpLogStatus{Status: "OK"}}
 	oplog.init(maxBytes)
 	return oplog, nil
 }
@@ -103,6 +122,7 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 		select {
 		case op := <-ops:
 			log.Debugf("OPLOG ingest operation: %#v", op.Info())
+			oplog.Status.QueueSize = len(ops)
 			for {
 				if err := c.Insert(op); err != nil {
 					log.Warnf("OPLOG can't insert operation, try to reconnect: %s", err)
@@ -112,6 +132,7 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 					c = oplog.c()
 					continue
 				}
+				oplog.Status.EventsIngested++
 				break
 			}
 		}

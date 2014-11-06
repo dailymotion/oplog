@@ -52,6 +52,31 @@ func (daemon *SSEDaemon) authenticate(r *http.Request) bool {
 }
 
 func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		w.WriteHeader(405)
+		return
+	}
+	switch r.URL.Path {
+	case "/status":
+		daemon.Status(w, r)
+	case "/events":
+		daemon.Events(w, r)
+	default:
+		w.WriteHeader(404)
+	}
+}
+
+func (daemon *SSEDaemon) Status(w http.ResponseWriter, r *http.Request) {
+	status, err := json.Marshal(daemon.ol.Status)
+	if err != nil {
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(status)
+}
+
+func (daemon *SSEDaemon) Events(w http.ResponseWriter, r *http.Request) {
 	log.Info("SSE connection started")
 
 	if r.Header.Get("Accept") != "text/event-stream" {
@@ -92,11 +117,13 @@ func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	go daemon.ol.Tail(lastId, filter, ops, err)
+	daemon.ol.Status.Clients++
 
 	for {
 		select {
 		case <-notifier.CloseNotify():
 			log.Info("SSE connection closed")
+			daemon.ol.Status.Clients--
 			return
 		case err := <-err:
 			log.Warnf("SSE oplog error %s", err)
