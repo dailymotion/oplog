@@ -8,7 +8,7 @@ For more information, see the [Wiki page](https://wiki.dailymotion.com/display/X
 
 ## Install
 
-    go install github.com/dailymotion/oplog/cmd/oplogd
+    go build -o /usr/local/bin/oplogd github.com/dailymotion/oplog/cmd/oplogd
 
 ## UDP API
 
