@@ -6,6 +6,10 @@ The agent exposes an [Server Sent Event](http://dev.w3.org/html5/eventsource/) A
 
 For more information, see the [Wiki page](https://wiki.dailymotion.com/display/XP/OpLog) about this project.
 
+## Install
+
+    go install github.com/dailymotion/oplog/cmd/oplogd
+
 ## UDP API
 
 To send operation events to the agent, an UDP datagram a JSON object must be crafted and sent on the agent's UDP port (8042 by default).
