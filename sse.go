@@ -14,10 +14,10 @@ type SSEDaemon struct {
 	ol *OpLog
 }
 
-func NewSSEDaemon(port int, ol *OpLog) *SSEDaemon {
+func NewSSEDaemon(addr string, ol *OpLog) *SSEDaemon {
 	daemon := &SSEDaemon{nil, ol}
 	daemon.s = &http.Server{
-		Addr:           fmt.Sprintf(":%d", port),
+		Addr:           addr,
 		Handler:        daemon,
 		MaxHeaderBytes: 1 << 20,
 	}

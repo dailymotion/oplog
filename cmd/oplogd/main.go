@@ -8,6 +8,7 @@ import (
 )
 
 var (
+	listenAddr           = flag.String("listen", ":8042", "The address to listen on. Same address is used for both SSE(HTTP) and UDP APIs")
 	mongoURL             = flag.String("mongo-url", "", "MongoDB URL to connect to.")
 	cappedCollectionSize = flag.Int("capped-collection-size", 104857600, "Size of the created MongoDB capped collection size in bytes (default 100MB)")
 	maxQueuedEvents      = flag.Int("max-queued-events", 100000, "Number of events to queue before starting throwing UDP messages")
@@ -22,11 +23,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	udpd := oplog.NewUDPDaemon(8042, ol)
+	udpd := oplog.NewUDPDaemon(*listenAddr, ol)
 	go func() {
 		log.Fatal(udpd.Run(*maxQueuedEvents))
 	}()
 
-	ssed := oplog.NewSSEDaemon(8042, ol)
+	ssed := oplog.NewSSEDaemon(*listenAddr, ol)
 	log.Fatal(ssed.Run())
 }

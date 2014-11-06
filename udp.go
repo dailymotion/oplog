@@ -2,7 +2,6 @@ package oplog
 
 import (
 	"encoding/json"
-	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -19,12 +18,12 @@ type UDPOperation struct {
 
 // UDPDaemon listens for events and send them to the oplog MongoDB capped collection
 type UDPDaemon struct {
-	port int
+	addr string
 	ol   *OpLog
 }
 
-func NewUDPDaemon(port int, ol *OpLog) *UDPDaemon {
-	return &UDPDaemon{port, ol}
+func NewUDPDaemon(addr string, ol *OpLog) *UDPDaemon {
+	return &UDPDaemon{addr, ol}
 }
 
 // Run reads every datagrams and send them to the oplog
@@ -33,7 +32,7 @@ func NewUDPDaemon(port int, ol *OpLog) *UDPDaemon {
 // the UDP server start throwing messages. This is particularly important to handle underlaying
 // MongoDB slowdowns or unavalability.
 func (daemon *UDPDaemon) Run(queueSize int) error {
-	udpAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf(":%d", daemon.port))
+	udpAddr, err := net.ResolveUDPAddr("udp4", daemon.addr)
 	if err != nil {
 		return err
 	}
