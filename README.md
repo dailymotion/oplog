@@ -40,6 +40,26 @@ The SSE API runs on the same port as UDP API but using TCP. The W3C SSE protocol
 
 On each received event, the client must store the last event id and submit it back to the server on reconnect using the `Last-Event-ID` HTTP header. The client must then ensure the `Last-Event-ID` header is sent back in the response. It may happen that the id defined by `Last-Event-ID` is no longer available, in this case, the agent won't send the backlog and will ignore the `Last-Event-ID` header.
 
+```
+GET /ops HTTP/1.1
+User-Agent: curl/7.37.1
+Host: localhost:8042
+Accept: text/event-stream
+
+HTTP/1.1 200 OK
+Content-Type: text/event-stream; charset=utf-8
+
+id: 545b55c7f095528dd0f3863c
+event: INSERT
+data: {"timestamp":"2014-11-06T03:04:39.041-08:00","user_id":"x1234","type":"video","id":"x345"}
+
+id: 545b55c8f095528dd0f3863d
+event: DELETE
+data: {"timestamp":"2014-11-06T03:04:40.091-08:00","user_id":"x1234","type":"video","id":"x345"}
+
+…
+```
+
 ## Status Endpoint
 
 The agent exposes a `/status` endpoint over HTTP to show some statistics about the agent. A JSON object is returned with the following fields:
