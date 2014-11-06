@@ -52,22 +52,24 @@ The agent exposes a `/status` endpoint over HTTP to show some statistics about t
 * `queue_max_size`:  Maximum number of events allowed in the ingestion queue before discarding events
 * `clients`: Number of clients connected to the SSE API
 
-    GET /status
+```javascript
+GET /status
 
-    HTTP/1.1 200 OK
-    Content-Length: 144
-    Content-Type: application/json
-    Date: Thu, 06 Nov 2014 10:40:25 GMT
+HTTP/1.1 200 OK
+Content-Length: 144
+Content-Type: application/json
+Date: Thu, 06 Nov 2014 10:40:25 GMT
 
-    {
-        "clients": 0,
-        "events_discarded": 0,
-        "events_error": 0,
-        "events_ingested": 0,
-        "events_received": 0,
-        "queue_max_size": 100000,
-        "queue_size": 0,
-        "status": "OK"
-    }
+{
+    "clients": 0,
+    "events_discarded": 0,
+    "events_error": 0,
+    "events_ingested": 0,
+    "events_received": 0,
+    "queue_max_size": 100000,
+    "queue_size": 0,
+    "status": "OK"
+}
+```
 
 
