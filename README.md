@@ -42,7 +42,7 @@ On each received event, the client must store the last event id and submit it ba
 
 ## Status Endpoint
 
-The agent exposes a {{/status}} endpoint over HTTP to show some statistics about the agent. A JSON object is returned with the following fields:
+The agent exposes a `/status` endpoint over HTTP to show some statistics about the agent. A JSON object is returned with the following fields:
 
 * `events_received`: Total number of events recieved on the UDP interface
 * `events_ingested`: Total number of events ingested into MongoDB with success
@@ -51,4 +51,23 @@ The agent exposes a {{/status}} endpoint over HTTP to show some statistics about
 * `queue_size`: Current number of events in the ingestion queue
 * `queue_max_size`:  Maximum number of events allowed in the ingestion queue before discarding events
 * `clients`: Number of clients connected to the SSE API
+
+    GET /status
+
+    HTTP/1.1 200 OK
+    Content-Length: 144
+    Content-Type: application/json
+    Date: Thu, 06 Nov 2014 10:40:25 GMT
+
+    {
+        "clients": 0,
+        "events_discarded": 0,
+        "events_error": 0,
+        "events_ingested": 0,
+        "events_received": 0,
+        "queue_max_size": 100000,
+        "queue_size": 0,
+        "status": "OK"
+    }
+
 
