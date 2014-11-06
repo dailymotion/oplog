@@ -62,7 +62,7 @@ data: {"timestamp":"2014-11-06T03:04:40.091-08:00","user_id":"x1234","type":"vid
 
 The agent exposes a `/status` endpoint over HTTP to show some statistics about the agent. A JSON object is returned with the following fields:
 
-* `events_received`: Total number of events recieved on the UDP interface
+* `events_received`: Total number of events received on the UDP interface
 * `events_ingested`: Total number of events ingested into MongoDB with success
 * `events_error`: Total number of events received on the UDP interface with an invalid format
 * `events_discarded`: Total number of events discarded because the queue was full
