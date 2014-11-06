@@ -59,8 +59,8 @@ func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/status":
 		daemon.Status(w, r)
-	case "/events":
-		daemon.Events(w, r)
+	case "/ops":
+		daemon.Ops(w, r)
 	default:
 		w.WriteHeader(404)
 	}
@@ -76,7 +76,7 @@ func (daemon *SSEDaemon) Status(w http.ResponseWriter, r *http.Request) {
 	w.Write(status)
 }
 
-func (daemon *SSEDaemon) Events(w http.ResponseWriter, r *http.Request) {
+func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	log.Info("SSE connection started")
 
 	if r.Header.Get("Accept") != "text/event-stream" {
