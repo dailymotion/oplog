@@ -1,21 +1,24 @@
 package oplog
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	log "github.com/Sirupsen/logrus"
 )
 
 // SSEDaemon listens for events and send them to the oplog MongoDB capped collection
 type SSEDaemon struct {
-	s  *http.Server
-	ol *OpLog
+	s        *http.Server
+	ol       *OpLog
+	Password string
 }
 
 func NewSSEDaemon(addr string, ol *OpLog) *SSEDaemon {
-	daemon := &SSEDaemon{nil, ol}
+	daemon := &SSEDaemon{nil, ol, ""}
 	daemon.s = &http.Server{
 		Addr:           addr,
 		Handler:        daemon,
@@ -25,12 +28,40 @@ func NewSSEDaemon(addr string, ol *OpLog) *SSEDaemon {
 	return daemon
 }
 
+// authenticate checks for HTTP basic authentication if an admin password is set.
+func (daemon *SSEDaemon) authenticate(r *http.Request) bool {
+	if daemon.Password == "" {
+		return true
+	}
+
+	s := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
+	if len(s) != 2 || s[0] != "Basic" {
+		return false
+	}
+
+	b, err := base64.StdEncoding.DecodeString(s[1])
+	if err != nil {
+		return false
+	}
+	pair := strings.SplitN(string(b), ":", 2)
+	if len(pair) != 2 {
+		return false
+	}
+
+	return daemon.Password == pair[1]
+}
+
 func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Info("SSE connection started")
 
 	if r.Header.Get("Accept") != "text/event-stream" {
 		// Not an event stream request, return a 406 Not Acceptable HTTP error
 		w.WriteHeader(406)
+		return
+	}
+
+	if !daemon.authenticate(r) {
+		w.WriteHeader(401)
 		return
 	}
 
