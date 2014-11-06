@@ -28,7 +28,11 @@ func NewUDPDaemon(port int, ol *OpLog) *UDPDaemon {
 }
 
 // Run reads every datagrams and send them to the oplog
-func (daemon *UDPDaemon) Run() error {
+//
+// The queueSize parameter defines the number of operation that can be queued before
+// the UDP server start throwing messages. This is particularly important to handle underlaying
+// MongoDB slowdowns or unavalability.
+func (daemon *UDPDaemon) Run(queueSize int) error {
 	udpAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf(":%d", daemon.port))
 	if err != nil {
 		return err
@@ -38,6 +42,9 @@ func (daemon *UDPDaemon) Run() error {
 	if err != nil {
 		return err
 	}
+
+	ops := make(chan *Operation, queueSize)
+	go daemon.ol.Ingest(ops)
 
 	operation := &UDPOperation{}
 	for {
@@ -49,14 +56,20 @@ func (daemon *UDPDaemon) Run() error {
 			continue
 		}
 
-		err = json.Unmarshal(buffer[:n], operation)
-		if err != nil {
-			log.Warnf("Invalid JSON: %s", err)
+		log.Debugf("UDP received operation from UDP: %s", buffer[:n])
+
+		if len(ops) >= queueSize {
+			log.Warnf("UDP input queue is full, thowing message: %s", buffer[:n])
 			continue
 		}
 
-		log.Debugf("Received operation from UDP: %#v", operation)
-		daemon.ol.Insert(&Operation{
+		err = json.Unmarshal(buffer[:n], operation)
+		if err != nil {
+			log.Warnf("UDP invalid JSON recieved: %s", err)
+			continue
+		}
+
+		ops <- &Operation{
 			Event: strings.ToUpper(operation.Event),
 			Data: &OperationData{
 				Timestamp: time.Now(),
@@ -64,6 +77,6 @@ func (daemon *UDPDaemon) Run() error {
 				Type:      operation.Type,
 				Id:        operation.Id,
 			},
-		})
+		}
 	}
 }

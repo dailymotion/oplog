@@ -9,8 +9,11 @@ import (
 )
 
 type OpLog struct {
-	db *mgo.Database
-	c  *mgo.Collection
+	s *mgo.Session
+}
+
+type OpLogCollection struct {
+	*mgo.Collection
 }
 
 // Operation represents an operation stored in the OpLog, ready to be exposed as SSE.
@@ -38,24 +41,24 @@ func NewOpLog(mongoURL string, maxBytes int) (*OpLog, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	db := session.DB("")
-	c := db.C("oplog")
-
-	oplog := &OpLog{db, c}
+	oplog := &OpLog{session}
 	oplog.init(maxBytes)
 	return oplog, nil
 }
 
-// Close closes the underlaying MongoDB session.
-func (oplog *OpLog) Close() {
-	oplog.db.Session.Close()
+func (oplog *OpLog) c() *OpLogCollection {
+	return &OpLogCollection{oplog.s.Copy().DB("").C("oplog")}
+}
+
+// Close closes the underlaying mgo session
+func (c *OpLogCollection) Close() {
+	c.Database.Session.Close()
 }
 
 // init creates capped collection if it does not exists.
 func (oplog *OpLog) init(maxBytes int) {
 	exists := false
-	names, _ := oplog.db.CollectionNames()
+	names, _ := oplog.s.DB("").CollectionNames()
 	for _, name := range names {
 		if name == "oplog" {
 			exists = true
@@ -63,54 +66,69 @@ func (oplog *OpLog) init(maxBytes int) {
 		}
 	}
 	if !exists {
-		log.Info("Creating capped collection")
-		oplog.c.Create(&mgo.CollectionInfo{
+		log.Info("OPLOG creating capped collection")
+		oplog.c().Create(&mgo.CollectionInfo{
 			Capped:   true,
 			MaxBytes: maxBytes,
 		})
 	}
 }
 
-// ping tests the MongoDB connection and tries to reconnect in case of error
-func (oplog *OpLog) ping() {
-	if err := oplog.db.Session.Ping(); err != nil {
-		oplog.db.Session.Refresh()
-	}
-}
-
 // Insert append a operation into the OpLog
-func (oplog *OpLog) Insert(operation *Operation) error {
-	// TODO: buffering + resume on db down
-	return oplog.c.Insert(operation)
+func (oplog *OpLog) Ingest(ops <-chan *Operation) {
+	c := oplog.c()
+	for {
+		select {
+		case op := <-ops:
+			log.Debugf("OPLOG ingest operation: %#v", op)
+			for {
+				if err := c.Insert(op); err != nil {
+					log.Warnf("OPLOG can't insert operation, try to reconnect: %s", err)
+					// Try to reconnect
+					time.Sleep(time.Second)
+					c.Close()
+					c = oplog.c()
+					continue
+				}
+				break
+			}
+		}
+	}
 }
 
 // HasId checks if an operation id is present in the capped collection.
 func (oplog *OpLog) HasId(id bson.ObjectId) (bool, error) {
-	count, err := oplog.c.FindId(id).Count()
+	c := oplog.c()
+	defer c.Close()
+	count, err := c.FindId(id).Count()
 	if err != nil {
 		return false, err
 	}
 	return count != 0, nil
 }
 
+// LastId returns the most recently inserted operation id if any or nil if oplog is empty
 func (oplog *OpLog) LastId() *bson.ObjectId {
+	c := oplog.c()
+	defer c.Close()
 	operation := &Operation{}
-	oplog.c.Find(nil).Sort("-$natural").One(operation)
+	c.Find(nil).Sort("-$natural").One(operation)
 	return operation.Id
 }
 
-func (oplog *OpLog) tail(lastId *bson.ObjectId) *mgo.Iter {
+// tail creates a tail cursor starting at a given id
+func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId) *mgo.Iter {
 	var query *mgo.Query
 	if lastId == nil {
 		// If no last id provided, find the last operation id in the colleciton
 		lastId = oplog.LastId()
 	}
 	if lastId != nil {
-		query = oplog.c.Find(bson.M{"_id": bson.M{"$gt": lastId}})
+		query = c.Find(bson.M{"_id": bson.M{"$gt": lastId}})
 	} else {
 		// If last id is still nil, that means the collection is empty
 		// Read from the begining
-		query = oplog.c.Find(nil)
+		query = c.Find(nil)
 	}
 	return query.Sort("$natural").Tail(5 * time.Second)
 }
@@ -119,9 +137,9 @@ func (oplog *OpLog) tail(lastId *bson.ObjectId) *mgo.Iter {
 // the given channel. If the lastId parameter is given, all operation posted after
 // this event will be returned.
 func (oplog *OpLog) Tail(lastId *bson.ObjectId, out chan<- Operation, err chan<- error) {
+	c := oplog.c()
 	operation := Operation{}
-	oplog.ping()
-	iter := oplog.tail(lastId)
+	iter := oplog.tail(c, lastId)
 
 	for {
 		for iter.Next(&operation) {
@@ -133,10 +151,11 @@ func (oplog *OpLog) Tail(lastId *bson.ObjectId, out chan<- Operation, err chan<-
 			continue
 		}
 
-		if iter.Err() != nil {
-			err <- iter.Close()
-		}
-
-		iter = oplog.tail(lastId)
+		// Try to reconnect
+		log.Warnf("OPLOG tail failed with error, try to reconnect: %s", iter.Err())
+		iter.Close()
+		c.Close()
+		c = oplog.c()
+		iter = oplog.tail(c, lastId)
 	}
 }
