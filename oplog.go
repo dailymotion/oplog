@@ -1,6 +1,7 @@
 package oplog
 
 import (
+	"fmt"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -31,7 +32,29 @@ type OperationData struct {
 	Id        string    `bson:"id" json:"id"`
 }
 
-type OpHandler func(*Operation) bool
+// objectId returns a bson.ObjectId from an hex representation of an object id of nil
+// if an empty string is passed
+func objectId(id string) *bson.ObjectId {
+	if id != "" {
+		oid := bson.ObjectIdHex(id)
+		return &oid
+	}
+	return nil
+}
+
+// Close closes the underlaying mgo session
+func (c *OpLogCollection) Close() {
+	c.Database.Session.Close()
+}
+
+// Info returns a human readable version of the operation
+func (op *Operation) Info() string {
+	id := "(new)"
+	if op.Id != nil {
+		id = op.Id.Hex()
+	}
+	return fmt.Sprintf("%s:%s(%s:%s from %s)", id, op.Event, op.Data.Type, op.Data.Id, op.Data.UserId)
+}
 
 // NewOpLog returns an OpLog connected to the given provided mongo URL.
 // If the capped collection does not exists, it will be created with the max
@@ -48,11 +71,6 @@ func NewOpLog(mongoURL string, maxBytes int) (*OpLog, error) {
 
 func (oplog *OpLog) c() *OpLogCollection {
 	return &OpLogCollection{oplog.s.Copy().DB("").C("oplog")}
-}
-
-// Close closes the underlaying mgo session
-func (c *OpLogCollection) Close() {
-	c.Database.Session.Close()
 }
 
 // init creates capped collection if it does not exists.
@@ -80,7 +98,7 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 	for {
 		select {
 		case op := <-ops:
-			log.Debugf("OPLOG ingest operation: %#v", op)
+			log.Debugf("OPLOG ingest operation: %#v", op.Info())
 			for {
 				if err := c.Insert(op); err != nil {
 					log.Warnf("OPLOG can't insert operation, try to reconnect: %s", err)
@@ -97,23 +115,30 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 }
 
 // HasId checks if an operation id is present in the capped collection.
-func (oplog *OpLog) HasId(id bson.ObjectId) (bool, error) {
+func (oplog *OpLog) HasId(id string) bool {
 	c := oplog.c()
 	defer c.Close()
-	count, err := c.FindId(id).Count()
-	if err != nil {
-		return false, err
+	oid := objectId(id)
+	if oid == nil {
+		return false
 	}
-	return count != 0, nil
+	count, err := c.FindId(oid).Count()
+	if err != nil {
+		return false
+	}
+	return count != 0
 }
 
-// LastId returns the most recently inserted operation id if any or nil if oplog is empty
-func (oplog *OpLog) LastId() *bson.ObjectId {
+// LastId returns the most recently inserted operation id if any or "" if oplog is empty
+func (oplog *OpLog) LastId() string {
 	c := oplog.c()
 	defer c.Close()
 	operation := &Operation{}
 	c.Find(nil).Sort("-$natural").One(operation)
-	return operation.Id
+	if operation.Id != nil {
+		return operation.Id.Hex()
+	}
+	return ""
 }
 
 // tail creates a tail cursor starting at a given id
@@ -121,7 +146,7 @@ func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId) *mgo.Iter {
 	var query *mgo.Query
 	if lastId == nil {
 		// If no last id provided, find the last operation id in the colleciton
-		lastId = oplog.LastId()
+		lastId = objectId(oplog.LastId())
 	}
 	if lastId != nil {
 		query = c.Find(bson.M{"_id": bson.M{"$gt": lastId}})
@@ -136,14 +161,15 @@ func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId) *mgo.Iter {
 // Tail tails all the new operations in the oplog and send the operation in
 // the given channel. If the lastId parameter is given, all operation posted after
 // this event will be returned.
-func (oplog *OpLog) Tail(lastId *bson.ObjectId, out chan<- Operation, err chan<- error) {
+func (oplog *OpLog) Tail(lastId string, out chan<- Operation, err chan<- error) {
 	c := oplog.c()
 	operation := Operation{}
-	iter := oplog.tail(c, lastId)
+	lastObjectId := objectId(lastId)
+	iter := oplog.tail(c, lastObjectId)
 
 	for {
 		for iter.Next(&operation) {
-			lastId = operation.Id
+			lastObjectId = operation.Id
 			out <- operation
 		}
 
@@ -156,6 +182,6 @@ func (oplog *OpLog) Tail(lastId *bson.ObjectId, out chan<- Operation, err chan<-
 		iter.Close()
 		c.Close()
 		c = oplog.c()
-		iter = oplog.tail(c, lastId)
+		iter = oplog.tail(c, lastObjectId)
 	}
 }

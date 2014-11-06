@@ -28,13 +28,27 @@ func NewSSEDaemon(port int, ol *OpLog) *SSEDaemon {
 func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Info("SSE connection started")
 
+	if r.Header.Get("Accept") != "text/event-stream" {
+		// Not an event stream request, return a 406 Not Acceptable HTTP error
+		w.WriteHeader(406)
+		return
+	}
+
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream; charset=utf-8")
 	h.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	h.Set("Connection", "keep-alive")
 	h.Set("Access-Control-Allow-Origin", "*")
 
-	// TODO handle LastId
+	lastId := r.Header.Get("Last-Event-ID")
+	if daemon.ol.HasId(lastId) {
+		h.Set("Last-Event-ID", lastId)
+	} else {
+		// If requested id doesn't exists, start the stream from the very last
+		// operation in the oplog and do not return the Last-Event-ID header
+		// to indicate we didn't obey the request
+		lastId = daemon.ol.LastId()
+	}
 
 	flusher := w.(http.Flusher)
 	notifier := w.(http.CloseNotifier)
@@ -42,7 +56,7 @@ func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err := make(chan error)
 	flusher.Flush()
 
-	go daemon.ol.Tail(nil, ops, err)
+	go daemon.ol.Tail(lastId, ops, err)
 
 	for {
 		select {
@@ -53,13 +67,13 @@ func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Warnf("SSE oplog error %s", err)
 			return
 		case op := <-ops:
-			log.Debugf("SSE sending event %s", op.Id)
+			log.Debugf("SSE sending event %s", op.Id.Hex())
 			data, err := json.Marshal(op.Data)
 			if err != nil {
 				log.Warnf("SSE JSON encoding error %s", err)
 				continue
 			}
-			fmt.Fprintf(w, "id: %d\n", op.Id)
+			fmt.Fprintf(w, "id: %s\n", op.Id.Hex())
 			fmt.Fprintf(w, "event: %s\n", op.Event)
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
