@@ -42,8 +42,6 @@ On each received event, the client must store the last event id and submit it ba
 
 ```
 GET /ops HTTP/1.1
-User-Agent: curl/7.37.1
-Host: localhost:8042
 Accept: text/event-stream
 
 HTTP/1.1 200 OK
