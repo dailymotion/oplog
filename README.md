@@ -8,6 +8,13 @@ For more information, see the [Wiki page](https://wiki.dailymotion.com/display/X
 
 ## Install
 
+Because this repository is private, you have to make sure git will use github using ssh if you are using 2FA. You can set this up with the following command:
+
+    git config --global url."git@github.com:".insteadOf "https://github.com/"
+
+Then to install the project, execute the following two commands:
+
+    go get github.com/dailymotion/oplog
     go build -o /usr/local/bin/oplogd github.com/dailymotion/oplog/cmd/oplogd
 
 ## UDP API
