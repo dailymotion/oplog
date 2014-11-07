@@ -26,7 +26,7 @@ The format of the message is as follow:
 ```javascript
 {
     "event": "insert",
-    "user_id": "x1234",
+    "parents": ["user/x1234"],
     "type": "video",
     "id": "x345",
 }
@@ -35,7 +35,7 @@ The format of the message is as follow:
 All keys are required:
 
 * `event`: The type of event. Can be `INSERT`, `UPDATE` or `DELETE`.
-* `user_id`: The owner xid of the modified object.
+* `parents`: The list of parent objects of the modified object formated as `type/xid`.
 * `type`: The object type (i.e.: `video`, `user`, `playlist`…)
 * `id`: The object xid of the impacted object.
 
