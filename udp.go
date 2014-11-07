@@ -74,11 +74,11 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 
 		daemon.ol.Status.EventsReceived++
 		ops <- &Operation{
-			Event: strings.ToUpper(operation.Event),
+			Event: strings.ToLower(operation.Event),
 			Data: &OperationData{
 				Timestamp: time.Now(),
 				UserId:    operation.UserId,
-				Type:      operation.Type,
+				Type:      strings.ToLower(operation.Type),
 				Id:        operation.Id,
 			},
 		}
