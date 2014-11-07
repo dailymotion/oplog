@@ -33,7 +33,7 @@ type OpLogStatus struct {
 }
 
 type OpLogFilter struct {
-	Type string
+	Types []string
 }
 
 type OpLogCollection struct {
@@ -169,8 +169,8 @@ func (oplog *OpLog) LastId() string {
 // tail creates a tail cursor starting at a given id
 func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId, filter OpLogFilter) *mgo.Iter {
 	query := bson.M{}
-	if filter.Type != "" {
-		query["data.t"] = filter.Type
+	if len(filter.Types) > 0 {
+		query["data.t"] = bson.M{"$in": filter.Types}
 	}
 	if lastId == nil {
 		// If no last id provided, find the last operation id in the colleciton
@@ -179,6 +179,7 @@ func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId, filter OpLog
 	if lastId != nil {
 		query["_id"] = bson.M{"$gt": lastId}
 	}
+	fmt.Printf("%#v\n", query)
 	return c.Find(query).Sort("$natural").Tail(5 * time.Second)
 }
 

@@ -106,8 +106,12 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 		lastId = daemon.ol.LastId()
 	}
 
+	types := []string{}
+	if r.URL.Query().Get("types") != "" {
+		types = strings.Split(r.URL.Query().Get("types"), ",")
+	}
 	filter := OpLogFilter{
-		Type: r.URL.Query().Get("type"),
+		Types: types,
 	}
 
 	flusher := w.(http.Flusher)
