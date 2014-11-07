@@ -110,8 +110,13 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("types") != "" {
 		types = strings.Split(r.URL.Query().Get("types"), ",")
 	}
+	parents := []string{}
+	if r.URL.Query().Get("parents") != "" {
+		parents = strings.Split(r.URL.Query().Get("parents"), ",")
+	}
 	filter := OpLogFilter{
-		Types: types,
+		Types:   types,
+		Parents: parents,
 	}
 
 	flusher := w.(http.Flusher)

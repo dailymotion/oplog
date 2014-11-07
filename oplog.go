@@ -33,7 +33,8 @@ type OpLogStatus struct {
 }
 
 type OpLogFilter struct {
-	Types []string
+	Types   []string
+	Parents []string
 }
 
 type OpLogCollection struct {
@@ -50,7 +51,7 @@ type Operation struct {
 // OperationData is the data part of the SSE event for the operation.
 type OperationData struct {
 	Timestamp time.Time `bson:"ts" json:"timestamp"`
-	UserId    string    `bson:"uid" json:"user_id"`
+	Parents   []string  `bson:"p" json:"parents"`
 	Type      string    `bson:"t" json:"type"`
 	Id        string    `bson:"id" json:"id"`
 }
@@ -76,7 +77,7 @@ func (op *Operation) Info() string {
 	if op.Id != nil {
 		id = op.Id.Hex()
 	}
-	return fmt.Sprintf("%s:%s(%s:%s from %s)", id, op.Event, op.Data.Type, op.Data.Id, op.Data.UserId)
+	return fmt.Sprintf("%s:%s(%s:%s)", id, op.Event, op.Data.Type, op.Data.Id)
 }
 
 // NewOpLog returns an OpLog connected to the given provided mongo URL.
@@ -171,6 +172,9 @@ func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId, filter OpLog
 	query := bson.M{}
 	if len(filter.Types) > 0 {
 		query["data.t"] = bson.M{"$in": filter.Types}
+	}
+	if len(filter.Parents) > 0 {
+		query["data.p"] = bson.M{"$in": filter.Parents}
 	}
 	if lastId == nil {
 		// If no last id provided, find the last operation id in the colleciton
