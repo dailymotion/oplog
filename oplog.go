@@ -55,10 +55,10 @@ type OperationData struct {
 	Id        string    `bson:"id" json:"id"`
 }
 
-// objectId returns a bson.ObjectId from an hex representation of an object id of nil
-// if an empty string is passed
-func objectId(id string) *bson.ObjectId {
-	if id != "" {
+// parseObjectId returns a bson.ObjectId from an hex representation of an object id or nil
+// if an empty string is passed or if the format of the id wasn't valid
+func parseObjectId(id string) *bson.ObjectId {
+	if id != "" && bson.IsObjectIdHex(id) {
 		oid := bson.ObjectIdHex(id)
 		return &oid
 	}
@@ -143,7 +143,7 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 func (oplog *OpLog) HasId(id string) bool {
 	c := oplog.c()
 	defer c.Close()
-	oid := objectId(id)
+	oid := parseObjectId(id)
 	if oid == nil {
 		return false
 	}
@@ -174,7 +174,7 @@ func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId, filter OpLog
 	}
 	if lastId == nil {
 		// If no last id provided, find the last operation id in the colleciton
-		lastId = objectId(oplog.LastId())
+		lastId = parseObjectId(oplog.LastId())
 	}
 	if lastId != nil {
 		query["_id"] = bson.M{"$gt": lastId}
@@ -188,7 +188,7 @@ func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId, filter OpLog
 func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- Operation, err chan<- error) {
 	c := oplog.c()
 	operation := Operation{}
-	lastObjectId := objectId(lastId)
+	lastObjectId := parseObjectId(lastId)
 	iter := oplog.tail(c, lastObjectId, filter)
 
 	for {
