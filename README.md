@@ -25,7 +25,7 @@ The format of the message is as follow:
 
 ```javascript
 {
-    "event": "INSERT",
+    "event": "insert",
     "user_id": "x1234",
     "type": "video",
     "id": "x345",
