@@ -59,12 +59,12 @@ HTTP/1.1 200 OK
 Content-Type: text/event-stream; charset=utf-8
 
 id: 545b55c7f095528dd0f3863c
-event: INSERT
-data: {"timestamp":"2014-11-06T03:04:39.041-08:00","user_id":"x1234","type":"video","id":"x345"}
+event: insert
+data: {"timestamp":"2014-11-06T03:04:39.041-08:00","parents":["x1234"],"type":"video","id":"x345"}
 
 id: 545b55c8f095528dd0f3863d
-event: DELETE
-data: {"timestamp":"2014-11-06T03:04:40.091-08:00","user_id":"x1234","type":"video","id":"x345"}
+event: delete
+data: {"timestamp":"2014-11-06T03:04:40.091-08:00","parents":["x1234"],"type":"video","id":"x345"}
 
 …
 ```
