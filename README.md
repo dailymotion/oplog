@@ -47,6 +47,10 @@ The SSE API runs on the same port as UDP API but using TCP. The W3C SSE protocol
 
 On each received event, the client must store the last event id and submit it back to the server on reconnect using the `Last-Event-ID` HTTP header. The client must then ensure the `Last-Event-ID` header is sent back in the response. It may happen that the id defined by `Last-Event-ID` is no longer available, in this case, the agent won't send the backlog and will ignore the `Last-Event-ID` header.
 
+The following filters can be passed as query-string:
+* `types` A list of object types to filter on separated by comas (i.e.: `types=video,user`).
+* `parents` A coma separated list of `type/xid` to filter on
+
 ```
 GET /ops HTTP/1.1
 Accept: text/event-stream
