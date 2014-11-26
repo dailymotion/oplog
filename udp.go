@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -31,7 +32,7 @@ func NewUDPDaemon(addr string, ol *OpLog) *UDPDaemon {
 // The queueSize parameter defines the number of operation that can be queued before
 // the UDP server start throwing messages. This is particularly important to handle underlaying
 // MongoDB slowdowns or unavalability.
-func (daemon *UDPDaemon) Run(queueMaxSize int) error {
+func (daemon *UDPDaemon) Run(queueMaxSize uint64) error {
 	udpAddr, err := net.ResolveUDPAddr("udp4", daemon.addr)
 	if err != nil {
 		return err
@@ -46,7 +47,6 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 	ops := make(chan *Operation, queueMaxSize)
 	go daemon.ol.Ingest(ops)
 
-	operation := &UDPOperation{}
 	for {
 		buffer := make([]byte, 1024)
 
@@ -58,21 +58,23 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 
 		log.Debugf("UDP received operation from UDP: %s", buffer[:n])
 
-		daemon.ol.Status.QueueSize = len(ops)
-		if daemon.ol.Status.QueueSize >= queueMaxSize {
+		queueSize := uint64(len(ops))
+		atomic.StoreUint64(&daemon.ol.Status.QueueSize, queueSize)
+		if queueSize >= queueMaxSize {
 			log.Warnf("UDP input queue is full, thowing message: %s", buffer[:n])
-			daemon.ol.Status.EventsDiscarded++
+			atomic.AddUint64(&daemon.ol.Status.EventsDiscarded, 1)
 			continue
 		}
 
-		err = json.Unmarshal(buffer[:n], operation)
+		operation := UDPOperation{}
+		err = json.Unmarshal(buffer[:n], &operation)
 		if err != nil {
 			log.Warnf("UDP invalid JSON recieved: %s", err)
-			daemon.ol.Status.EventsError++
+			atomic.AddUint64(&daemon.ol.Status.EventsError, 1)
 			continue
 		}
 
-		daemon.ol.Status.EventsReceived++
+		atomic.AddUint64(&daemon.ol.Status.EventsReceived, 1)
 		ops <- &Operation{
 			Event: strings.ToLower(operation.Event),
 			Data: &OperationData{

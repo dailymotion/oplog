@@ -2,6 +2,7 @@ package oplog
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -17,19 +18,19 @@ type OpLog struct {
 type OpLogStatus struct {
 	Status string `json:"status"`
 	// Total number of events recieved on the UDP interface
-	EventsReceived int `json:"events_received"`
+	EventsReceived uint64 `json:"events_received"`
 	// Total number of events ingested into MongoDB with success
-	EventsIngested int `json:"events_ingested"`
+	EventsIngested uint64 `json:"events_ingested"`
 	// Total number of events received on the UDP interface with an invalid format
-	EventsError int `json:"events_error"`
+	EventsError uint64 `json:"events_error"`
 	// Total number of events discarded because the queue was full
-	EventsDiscarded int `json:"events_discarded"`
+	EventsDiscarded uint64 `json:"events_discarded"`
 	// Current number of events in the ingestion queue
-	QueueSize int `json:"queue_size"`
+	QueueSize uint64 `json:"queue_size"`
 	// Maximum number of events allowed in the ingestion queue before discarding events
-	QueueMaxSize int `json:"queue_max_size"`
+	QueueMaxSize uint64 `json:"queue_max_size"`
 	// Number of clients connected to the SSE API
-	Clients int `json:"clients"`
+	Clients uint64 `json:"clients"`
 }
 
 type OpLogFilter struct {
@@ -123,7 +124,7 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 		select {
 		case op := <-ops:
 			log.Debugf("OPLOG ingest operation: %#v", op.Info())
-			oplog.Status.QueueSize = len(ops)
+			atomic.StoreUint64(&oplog.Status.QueueSize, uint64(len(ops)))
 			for {
 				if err := c.Insert(op); err != nil {
 					log.Warnf("OPLOG can't insert operation, try to reconnect: %s", err)
@@ -133,7 +134,7 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 					c = oplog.c()
 					continue
 				}
-				oplog.Status.EventsIngested++
+				atomic.AddUint64(&oplog.Status.EventsIngested, 1)
 				break
 			}
 		}
