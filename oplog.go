@@ -184,7 +184,6 @@ func (oplog *OpLog) tail(c *OpLogCollection, lastId *bson.ObjectId, filter OpLog
 	if lastId != nil {
 		query["_id"] = bson.M{"$gt": lastId}
 	}
-	fmt.Printf("%#v\n", query)
 	return c.Find(query).Sort("$natural").Tail(5 * time.Second)
 }
 
