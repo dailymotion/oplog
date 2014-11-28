@@ -127,13 +127,13 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	go daemon.ol.Tail(lastId, filter, ops, err)
-	atomic.AddUint64(&daemon.ol.Status.Clients, 1)
+	atomic.AddInt64(&daemon.ol.Status.Clients, 1)
 
 	for {
 		select {
 		case <-notifier.CloseNotify():
 			log.Info("SSE connection closed")
-			daemon.ol.Status.Clients--
+			atomic.AddInt64(&daemon.ol.Status.Clients, -1)
 			return
 		case err := <-err:
 			log.Warnf("SSE oplog error %s", err)

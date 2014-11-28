@@ -30,7 +30,7 @@ type OpLogStatus struct {
 	// Maximum number of events allowed in the ingestion queue before discarding events
 	QueueMaxSize uint64 `json:"queue_max_size"`
 	// Number of clients connected to the SSE API
-	Clients uint64 `json:"clients"`
+	Clients int64 `json:"clients"`
 }
 
 type OpLogFilter struct {
