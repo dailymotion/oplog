@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	log "github.com/Sirupsen/logrus"
 )
@@ -126,7 +127,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	go daemon.ol.Tail(lastId, filter, ops, err)
-	daemon.ol.Status.Clients++
+	atomic.AddUint64(&daemon.ol.Status.Clients, 1)
 
 	for {
 		select {
