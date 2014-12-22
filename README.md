@@ -43,16 +43,16 @@ Only xid must be used, numerical ids aren't accepted.
 
 ## SSE API
 
-The SSE API runs on the same port as UDP API but using TCP. The W3C SSE protocol is respected by the book. To connect to the API, a GET on `/ops` with the `Accept: text/event-stream` header must be performed.
+The SSE API runs on the same port as UDP API but using TCP. The W3C SSE protocol is respected by the book. To connect to the API, a GET on `/` with the `Accept: text/event-stream` header must be performed.
 
-On each received event, the client must store the last event id and submit it back to the server on reconnect using the `Last-Event-ID` HTTP header. The client must then ensure the `Last-Event-ID` header is sent back in the response. It may happen that the id defined by `Last-Event-ID` is no longer available, in this case, the agent won't send the backlog and will ignore the `Last-Event-ID` header.
+On each received event, the client must store the last event id and submit it back to the server on reconnect using the `Last-Event-ID` HTTP header. The client must then ensure the `Last-Event-ID` header is sent back in the response. It may happen that the id defined by `Last-Event-ID` is no longer available, in this case, the agent won't send the backlog and will ignore the `Last-Event-ID` header. You may want to perform a full sync when such case happen.
 
 The following filters can be passed as query-string:
 * `types` A list of object types to filter on separated by comas (i.e.: `types=video,user`).
 * `parents` A coma separated list of `type/xid` to filter on
 
 ```
-GET /ops HTTP/1.1
+GET / HTTP/1.1
 Accept: text/event-stream
 
 HTTP/1.1 200 OK
@@ -68,6 +68,12 @@ data: {"timestamp":"2014-11-06T03:04:40.091-08:00","parents":["x1234"],"type":"v
 
 …
 ```
+
+### Full Sync
+
+If required, a full sync can be performed before streaming live updates. To perform a full sync, pass `0` as `Last-Event-ID`. Numeric event ids with lesser than 24 digits are considered as a sync id, which represent a milliseconds UNIX timestamp. By passing a millisecond timestamp, you are asking for syncing any objects that have been modified after this date. Passing `0` thus ensures every objects will be synced.
+
+If a full sync is interrupted during the transfer, the same mechanism as for live events will be used. Once sync is done, the stream will automatically switch to live events stream so your component is ensured not to miss any updates.
 
 ## Status Endpoint
 

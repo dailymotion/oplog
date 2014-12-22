@@ -3,7 +3,7 @@ package oplog
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -60,7 +60,7 @@ func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/status":
 		daemon.Status(w, r)
-	case "/ops":
+	case "/ops", "/":
 		daemon.Ops(w, r)
 	default:
 		w.WriteHeader(404)
@@ -122,7 +122,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 
 	flusher := w.(http.Flusher)
 	notifier := w.(http.CloseNotifier)
-	ops := make(chan Operation)
+	ops := make(chan io.WriterTo)
 	err := make(chan error)
 	flusher.Flush()
 
@@ -139,15 +139,12 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 			log.Warnf("SSE oplog error %s", err)
 			return
 		case op := <-ops:
-			log.Debugf("SSE sending event %s", op.Id.Hex())
-			data, err := json.Marshal(op.Data)
+			log.Debug("SSE sending event")
+			_, err := op.WriteTo(w)
 			if err != nil {
-				log.Warnf("SSE JSON encoding error %s", err)
+				log.Warnf("SSE write error %s", err)
 				continue
 			}
-			fmt.Fprintf(w, "id: %s\n", op.Id.Hex())
-			fmt.Fprintf(w, "event: %s\n", op.Event)
-			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		}
 	}
