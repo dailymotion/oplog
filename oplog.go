@@ -83,8 +83,7 @@ func parseObjectId(id string) *bson.ObjectId {
 func parseTimestampId(id string) (ts int64, ok bool) {
 	ts = -1
 	ok = false
-	// Numbers equal or larger than 24 digits are for a timestamp, it is certainly an object id
-	if len(id) < 24 {
+	if len(id) <= 13 {
 		if i, err := strconv.ParseInt(id, 10, 64); err == nil {
 			ts = i
 			ok = true
