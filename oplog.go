@@ -210,9 +210,6 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 
 // HasId checks if an operation id is present in the capped collection.
 func (oplog *OpLog) HasId(id string) bool {
-	db := oplog.DB()
-	defer db.Session.Close()
-
 	_, ok := parseTimestampId(id)
 	if ok {
 		// Id is a timestamp, timestamp are always valid
@@ -223,6 +220,9 @@ func (oplog *OpLog) HasId(id string) bool {
 	if oid == nil {
 		return false
 	}
+
+	db := oplog.DB()
+	defer db.Session.Close()
 	count, err := db.C("oplog").FindId(oid).Count()
 	if err != nil {
 		return false
@@ -252,10 +252,11 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 		query["data.p"] = bson.M{"$in": filter.Parents}
 	}
 
-	log.Debugf("last id: %s", lastId)
 	if ts, ok := parseTimestampId(lastId); ok {
-		// Id is a timestamp, timestamp are always valid
-		query["data.ts"] = bson.M{"$gte": time.Unix(0, ts)}
+		if ts > 0 {
+			// Id is a timestamp, timestamp are always valid
+			query["data.ts"] = bson.M{"$gte": time.Unix(0, ts)}
+		}
 		return db.C("objects").Find(query).Sort("ts").Iter(), false
 	} else {
 		oid := parseObjectId(lastId)
