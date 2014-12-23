@@ -69,11 +69,11 @@ data: {"timestamp":"2014-11-06T03:04:40.091-08:00","parents":["x1234"],"type":"v
 …
 ```
 
-### Full Sync
+### Initial Replication
 
-If required, a full sync can be performed before streaming live updates. To perform a full sync, pass `0` as `Last-Event-ID`. Numeric event ids with lesser than 24 digits are considered as a sync id, which represent a milliseconds UNIX timestamp. By passing a millisecond timestamp, you are asking for syncing any objects that have been modified after this date. Passing `0` thus ensures every objects will be synced.
+If required, an initial replication with all (still active) objects can be performed before streaming live updates. To perform an initial replication, pass `0` as `Last-Event-ID`. Numeric event ids with lesser than 24 digits are considered as a replication id, which represent a milliseconds UNIX timestamp. By passing a millisecond timestamp, you are asking for replicating any objects that have been modified after this date. Passing `0` thus ensures every objects will be replicated.
 
-If a full sync is interrupted during the transfer, the same mechanism as for live events will be used. Once sync is done, the stream will automatically switch to live events stream so your component is ensured not to miss any updates.
+If an initial replication is interrupted during the transfer, the same mechanism as for live events will be used. Once replication is done, the stream will automatically switch to live events stream so your component is ensured not to miss any updates.
 
 ## Status Endpoint
 

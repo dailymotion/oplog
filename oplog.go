@@ -257,7 +257,7 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 			// Id is a timestamp, timestamp are always valid
 			query["data.ts"] = bson.M{"$gte": time.Unix(0, ts)}
 		}
-		return db.C("objects").Find(query).Sort("ts").Iter(), false
+		return db.C("objects").Find(query).Sort("ts").Iter(), true
 	} else {
 		oid := parseObjectId(lastId)
 		if oid == nil {
@@ -267,7 +267,7 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 		if oid != nil {
 			query["_id"] = bson.M{"$gt": oid}
 		}
-		return db.C("oplog").Find(query).Sort("$natural").Tail(5 * time.Second), true
+		return db.C("oplog").Find(query).Sort("$natural").Tail(5 * time.Second), false
 	}
 }
 
@@ -275,10 +275,10 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 // the given channel. If the lastId parameter is given, all operation posted after
 // this event will be returned.
 //
-// If the lastId is a unix timestamp in milliseconds, the tailing will start by syncing
+// If the lastId is a unix timestamp in milliseconds, the tailing will start by replicating
 // all the objects last updated after the timestamp.
 //
-// Giving a lastId of 0 mean syncing all the stored objects before tailing the live updates.
+// Giving a lastId of 0 mean replicating all the stored objects before tailing the live updates.
 //
 // The filter argument can be used to filter on some type of objects or objects with given parrents.
 //
@@ -289,24 +289,24 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 	operation := Operation{}
 	object := ObjectState{}
 	var lastEv OperationEvent
-	var syncFallbackId string
-	iter, tailing := oplog.tail(db, lastId, filter)
+	var replicationFallbackId string
+	iter, replication := oplog.tail(db, lastId, filter)
 
 	for {
-		if tailing {
-			log.Debug("OPLOG start tailing")
-			for iter.Next(&operation) {
-				out <- operation
-				lastEv = operation
-			}
-		} else {
-			log.Debug("OPLOG start syncing")
+		if replication {
+			log.Debug("OPLOG start replication")
 			// Capture the current oplog position in order to resume at this position
-			// once full sync is done
-			syncFallbackId = oplog.LastId()
+			// once initial replication is done
+			replicationFallbackId = oplog.LastId()
 			for iter.Next(&object) {
 				out <- object
 				lastEv = object
+			}
+		} else {
+			log.Debug("OPLOG start live updates")
+			for iter.Next(&operation) {
+				out <- operation
+				lastEv = operation
 			}
 		}
 
@@ -316,12 +316,12 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 		}
 
 		// Try to reconnect
-		if tailing {
+		if !replication {
 			log.Warnf("OPLOG tail failed with error, try to reconnect: %s", iter.Err())
 		} else if iter.Err() == nil {
-			// Syncing done, switch to tailing at the last operation id inserted before
-			// the sync was started
-			lastId = syncFallbackId
+			// Replication done, switch to live update at the last operation id inserted before
+			// the replication was started
+			lastId = replicationFallbackId
 			lastEv = nil
 		}
 		iter.Close()
@@ -330,7 +330,7 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 		if lastEv != nil {
 			lastId = lastEv.GetEventId()
 		}
-		iter, tailing = oplog.tail(db, lastId, filter)
+		iter, replication = oplog.tail(db, lastId, filter)
 		time.Sleep(time.Second)
 	}
 }
