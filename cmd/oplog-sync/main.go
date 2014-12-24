@@ -44,31 +44,37 @@ func main() {
 
 	fh, err := os.Open(file)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("SYNC cannot open dump file: %s", err)
 	}
 	defer fh.Close()
 
 	lines, err := lineCounter(fh)
-	fh.Seek(0, 0)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("SYNC error counting lines: %s", err)
 	}
+	fh.Seek(0, 0)
 	createMap := make(oplog.OperationDataMap, lines)
 	deleteMap := make(oplog.OperationDataMap)
 
 	// Load dump in memory
 	obd := oplog.OperationData{}
 	scanner := bufio.NewScanner(fh)
+	line := 0
 	for scanner.Scan() {
-		json.Unmarshal(scanner.Bytes(), &obd)
+		line++
+		if err := json.Unmarshal(scanner.Bytes(), &obd); err != nil {
+			log.Fatalf("SYNC dump unmarshaling error at line %d: %s", line, err)
+		}
 		createMap[obd.GetId()] = obd
 	}
 	if err := scanner.Err(); err != nil {
-		log.Fatal(err)
+		log.Fatalf("SYNC dump reading error: %s", err)
 	}
 
 	// Scan the oplog db and generate the diff
-	ol.Diff(createMap, deleteMap)
+	if err := ol.Diff(createMap, deleteMap); err != nil {
+		log.Fatalf("SYNC diff error: %s", err)
+	}
 
 	// Generate events to fix the delta
 	db := ol.DB()

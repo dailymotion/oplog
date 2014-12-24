@@ -277,18 +277,22 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, deleteMap OperationDataMap)
 			}
 		}
 	}
+	if iter.Err() != nil {
+		return iter.Err()
+	}
 
 	// For all object present in the dump but not in the oplog, ensure objects
 	// haven't been deleted between the dump creation and the sync
 	for id, obd := range createMap {
 		err := db.C("objects").FindId(id).One(&obs)
-		if err != mgo.ErrNotFound {
-			if obd.Timestamp.Before(obs.Data.Timestamp) {
-				delete(createMap, obs.Id)
-			}
+		if err == mgo.ErrNotFound {
+			continue
 		}
 		if err != nil {
 			return err
+		}
+		if obd.Timestamp.Before(obs.Data.Timestamp) {
+			delete(createMap, obs.Id)
 		}
 	}
 
