@@ -161,20 +161,32 @@ func (oplog *OpLog) DB() *mgo.Database {
 
 // init creates capped collection if it does not exists.
 func (oplog *OpLog) init(maxBytes int) {
-	exists := false
+	oplogExists := false
+	objectsExists := false
 	names, _ := oplog.s.DB("").CollectionNames()
 	for _, name := range names {
-		if name == "oplog" {
-			exists = true
-			break
+		switch name {
+		case "oplog":
+			oplogExists = true
+		case "objects":
+			objectsExists = true
 		}
 	}
-	if !exists {
+	if !oplogExists {
 		log.Info("OPLOG creating capped collection")
-		oplog.s.DB("").C("oplog").Create(&mgo.CollectionInfo{
+		err := oplog.s.DB("").C("oplog").Create(&mgo.CollectionInfo{
 			Capped:   true,
 			MaxBytes: maxBytes,
 		})
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	if !objectsExists {
+		log.Info("OPLOG creating objects index")
+		if err := oplog.s.DB("").C("objects").EnsureIndexKey("event", "data.ts"); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 
