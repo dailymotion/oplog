@@ -240,6 +240,14 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, deleteMap OperationDataMap)
 	db := oplog.DB()
 	defer db.Session.Close()
 
+	// Find the most recent timestamp
+	dumpTime := time.Unix(0, 0)
+	for _, obd := range createMap {
+		if obd.Timestamp.After(dumpTime) {
+			dumpTime = obd.Timestamp
+		}
+	}
+
 	obs := ObjectState{}
 	defer db.Session.Close()
 	iter := db.C("objects").Find(bson.M{"event": bson.M{"$ne": "delete"}}).Iter()
@@ -249,7 +257,12 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, deleteMap OperationDataMap)
 			delete(createMap, obs.Id)
 		} else {
 			// The object only exists in the oplog db, add it to the delete map
-			deleteMap[obs.Id] = *obs.Data
+			// if the timestamp of the found object is older than oldest object
+			// in the dump in order to ensure we don't delete an object which
+			// have been created between the dump creation and the sync.
+			if obs.Data.Timestamp.Before(dumpTime) {
+				deleteMap[obs.Id] = *obs.Data
+			}
 		}
 	}
 
