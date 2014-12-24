@@ -1,6 +1,7 @@
 package oplog
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -55,6 +56,8 @@ type OperationData struct {
 	Type      string    `bson:"t" json:"type"`
 	Id        string    `bson:"id" json:"id"`
 }
+
+type OperationDataMap map[string]OperationData
 
 // ObjectState is the current state of an object given the most recent operation applied on it
 type ObjectState struct {
@@ -131,6 +134,14 @@ func (obj ObjectState) WriteTo(w io.Writer) (int64, error) {
 	return int64(n), err
 }
 
+func (obd OperationData) GetId() string {
+	b := bytes.Buffer{}
+	b.WriteString(obd.Type)
+	b.WriteString("/")
+	b.WriteString(obd.Id)
+	return b.String()
+}
+
 // NewOpLog returns an OpLog connected to the given provided mongo URL.
 // If the capped collection does not exists, it will be created with the max
 // size defined by maxBytes parameter.
@@ -167,45 +178,96 @@ func (oplog *OpLog) init(maxBytes int) {
 	}
 }
 
-// Insert append a operation into the OpLog
+// Ingest appends an operation into the OpLog thru a channel
 func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 	db := oplog.DB()
 	for {
 		select {
 		case op := <-ops:
-			log.Debugf("OPLOG ingest operation: %#v", op.Info())
 			atomic.StoreUint64(&oplog.Status.QueueSize, uint64(len(ops)))
-			for {
-				if err := db.C("oplog").Insert(op); err != nil {
-					log.Warnf("OPLOG can't insert operation, try to reconnect: %s", err)
-					// Try to reconnect
-					time.Sleep(time.Second)
-					db.Session.Close()
-					db = oplog.DB()
-					continue
-				}
-				break
-			}
-			// Apply the operation on the state collection
-			o := ObjectState{
-				Id:    fmt.Sprintf("%s/%s", op.Data.Type, op.Data.Id),
-				Event: op.Event,
-				Data:  op.Data,
-			}
-			for {
-				if _, err := db.C("objects").Upsert(bson.M{"_id": o.Id}, o); err != nil {
-					log.Warnf("OPLOG can't upsert object, try to reconnect: %s", err)
-					// Try to reconnect
-					time.Sleep(time.Second)
-					db.Session.Close()
-					db = oplog.DB()
-					continue
-				}
-				break
-			}
-			atomic.AddUint64(&oplog.Status.EventsIngested, 1)
+			oplog.Append(op, db)
 		}
 	}
+}
+
+// Append appends an operation into the OpLog
+//
+// If the db parameter is not nil, the passed db connection is used. In case of
+// error, the db pointer may be replaced by a new alive session.
+func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
+	if db == nil {
+		db = oplog.DB()
+	}
+	log.Debugf("OPLOG ingest operation: %#v", op.Info())
+	for {
+		if err := db.C("oplog").Insert(op); err != nil {
+			log.Warnf("OPLOG can't insert operation, try to reconnect: %s", err)
+			// Try to reconnect
+			time.Sleep(time.Second)
+			db.Session.Close()
+			db = oplog.DB()
+			continue
+		}
+		break
+	}
+	// Apply the operation on the state collection
+	o := ObjectState{
+		Id:    op.Data.GetId(),
+		Event: op.Event,
+		Data:  op.Data,
+	}
+	for {
+		if _, err := db.C("objects").Upsert(bson.M{"_id": o.Id}, o); err != nil {
+			log.Warnf("OPLOG can't upsert object, try to reconnect: %s", err)
+			// Try to reconnect
+			time.Sleep(time.Second)
+			db.Session.Close()
+			db = oplog.DB()
+			continue
+		}
+		break
+	}
+	atomic.AddUint64(&oplog.Status.EventsIngested, 1)
+}
+
+// Diff finds which objects must be created or deleted in order to fix the delta
+//
+// The createMap points to a map pointing to all objects present in the source database.
+// The function search of differences between the passed map and the oplog database and
+// objects present on both sides from the createMap and populate the deleteMap with objects
+// that are present in the oplog database but not in the source database.
+func (oplog *OpLog) Diff(createMap OperationDataMap, deleteMap OperationDataMap) error {
+	db := oplog.DB()
+	defer db.Session.Close()
+
+	obs := ObjectState{}
+	defer db.Session.Close()
+	iter := db.C("objects").Find(bson.M{"event": bson.M{"$ne": "delete"}}).Iter()
+	for iter.Next(&obs) {
+		if _, ok := createMap[obs.Id]; ok {
+			// Object exists on both sides, remove it from the create map
+			delete(createMap, obs.Id)
+		} else {
+			// The object only exists in the oplog db, add it to the delete map
+			deleteMap[obs.Id] = *obs.Data
+		}
+	}
+
+	// For all object present in the dump but not in the oplog, ensure objects
+	// haven't been deleted between the dump creation and the sync
+	for id, obd := range createMap {
+		err := db.C("objects").FindId(id).One(&obs)
+		if err != mgo.ErrNotFound {
+			if obd.Timestamp.Before(obs.Data.Timestamp) {
+				delete(createMap, obs.Id)
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // HasId checks if an operation id is present in the capped collection.
@@ -235,8 +297,8 @@ func (oplog *OpLog) LastId() string {
 	db := oplog.DB()
 	defer db.Session.Close()
 	operation := &Operation{}
-	db.C("oplog").Find(nil).Sort("-$natural").One(operation)
-	if operation.Id != nil {
+	err := db.C("oplog").Find(nil).Sort("-$natural").One(operation)
+	if err != mgo.ErrNotFound && operation.Id != nil {
 		return operation.Id.Hex()
 	}
 	return ""
@@ -257,6 +319,7 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 			// Id is a timestamp, timestamp are always valid
 			query["data.ts"] = bson.M{"$gte": time.Unix(0, ts)}
 		}
+		query["event"] = bson.M{"$ne": "delete"}
 		return db.C("objects").Find(query).Sort("ts").Iter(), true
 	} else {
 		oid := parseObjectId(lastId)
