@@ -142,4 +142,43 @@ Date: Thu, 06 Nov 2014 10:40:25 GMT
 }
 ```
 
+## Consumer
 
+To write a consumer you may use any SSE library and consume the API by ourself. If your consumer is written in Go, a dedicated consumer library is provided.
+
+Here is an example of Go consumer using the provided consumer library:
+
+```go
+import (
+    "fmt"
+
+    "github.com/dailymotion/oplog/consumer"
+)
+
+func main() {
+    c, err := consumer.Subscribe(myOplogURL, consumer.Options{})
+
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    ops := make(chan *consumer.Operation)
+    ack := make(chan *consumer.Operation)
+    go c.Process(ops, ack)
+
+    for {
+        // Get the next operation
+        op := <-ops
+
+        // Do something with the operation
+        url := fmt.Sprintf("http://api.domain.com/%s/%s", op.Data.Type, op.Data.ID)
+        data := MyAPIGetter(url)
+        MyDataSyncer(data)
+
+        // Ack the fact you handled the operation
+        ack <- op
+    }
+}
+```
+
+The ack mechanism allows you to handle operation in parallel without loosing track of which operation has been handled in case of connection failure recovery.

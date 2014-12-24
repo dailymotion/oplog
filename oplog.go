@@ -346,7 +346,7 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 	if ts, ok := parseTimestampId(lastId); ok {
 		if ts > 0 {
 			// Id is a timestamp, timestamp are always valid
-			query["data.ts"] = bson.M{"$gte": time.Unix(0, ts)}
+			query["data.ts"] = bson.M{"$gt": time.Unix(0, ts*1000000)}
 		}
 		query["event"] = bson.M{"$ne": "delete"}
 		return db.C("objects").Find(query).Sort("ts").Iter(), true
