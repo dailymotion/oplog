@@ -23,7 +23,7 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	ol, err := oplog.NewOpLog(*mongoURL, *cappedCollectionSize)
+	ol, err := oplog.New(*mongoURL, *cappedCollectionSize)
 	if err != nil {
 		log.Fatal(err)
 	}
