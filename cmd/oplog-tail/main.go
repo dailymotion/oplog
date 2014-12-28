@@ -51,9 +51,8 @@ func main() {
 		if op.Data == nil {
 			fmt.Printf("%s #%s\n", op.Event, op.ID)
 		} else {
-			fmt.Printf("%s #%s %s/%s\n", op.Event, op.ID, op.Data.Type, op.Data.ID)
-			fmt.Printf("  timestamp: %s\n", op.Data.Timestamp)
-			fmt.Printf("  parents: %s\n", strings.Join(op.Data.Parents, ", "))
+			fmt.Printf("%s: %s #%s %s/%s (%s)\n",
+				op.Data.Timestamp, op.Event, op.ID, op.Data.Type, op.Data.ID, strings.Join(op.Data.Parents, ", "))
 		}
 		ack <- op
 	}
