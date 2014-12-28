@@ -1,6 +1,7 @@
 package oplog
 
 import (
+	"fmt"
 	"io"
 	"strconv"
 	"time"
@@ -18,6 +19,16 @@ type OpLog struct {
 type OpLogFilter struct {
 	Types   []string
 	Parents []string
+}
+
+type GenericEvent interface {
+	io.WriterTo
+	GetEventId() string
+}
+
+type OpLogEvent struct {
+	Id    string
+	Event string
 }
 
 type OperationDataMap map[string]OperationData
@@ -44,6 +55,17 @@ func parseTimestampId(id string) (ts int64, ok bool) {
 		}
 	}
 	return
+}
+
+// GetEventId returns an SSE event id
+func (e OpLogEvent) GetEventId() string {
+	return e.Id
+}
+
+// WriteTo serializes an event as a SSE compatible message
+func (e OpLogEvent) WriteTo(w io.Writer) (int64, error) {
+	n, err := fmt.Fprintf(w, "id: %s\nevent: %s\n\n", e.GetEventId(), e.Event)
+	return int64(n), err
 }
 
 // New returns an OpLog connected to the given provided mongo URL.
@@ -251,10 +273,10 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 	if ts, ok := parseTimestampId(lastId); ok {
 		if ts > 0 {
 			// Id is a timestamp, timestamp are always valid
-			query["data.ts"] = bson.M{"$gt": time.Unix(0, ts*1000000)}
+			query["data.ts"] = bson.M{"$gte": time.Unix(0, ts*1000000)}
 		}
 		query["event"] = bson.M{"$ne": "delete"}
-		return db.C("objects").Find(query).Sort("ts").Iter(), true
+		return db.C("objects").Find(query).Sort("data.ts").Iter(), true
 	} else {
 		oid := parseObjectId(lastId)
 		if oid == nil {
@@ -264,7 +286,7 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 		if oid != nil {
 			query["_id"] = bson.M{"$gt": oid}
 		}
-		return db.C("oplog").Find(query).Sort("$natural").Tail(5 * time.Second), false
+		return db.C("oplog").Find(query).Sort("$natural").Tail(-1), false
 	}
 }
 
@@ -285,9 +307,20 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 	db := oplog.DB()
 	operation := Operation{}
 	object := ObjectState{}
-	var lastEv OperationEvent
+	var lastEv GenericEvent
 	var replicationFallbackId string
 	iter, replication := oplog.tail(db, lastId, filter)
+
+	if lastId == "0" {
+		// When full replication is requested, start by sending a "reset" event to instruct
+		// the consumer to reset its database before processing further operations.
+		// The id is 1 so if connection is lost after this event and consumer processed the event,
+		// the connection recover won't trigger a second "reset" event.
+		out <- &OpLogEvent{
+			Id:    "1",
+			Event: "reset",
+		}
+	}
 
 	for {
 		if replication {
@@ -307,17 +340,22 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 			}
 		}
 
-		if iter.Timeout() {
-			log.Debug("OPLOG timeout")
-			continue
-		}
-
 		// Try to reconnect
 		if !replication {
 			log.Warnf("OPLOG tail failed with error, try to reconnect: %s", iter.Err())
 		} else if iter.Err() == nil {
-			// Replication done, switch to live update at the last operation id inserted before
-			// the replication was started
+			// Replication is down, notify and swtich to live event stream
+			//
+			// Send a "live" operation to inform the consumer it is no live event stream.
+			// We use the last event id here in order to ensure the consumer will resume
+			// the replication starting at this point in time in case of a failure after
+			// the "live" event.
+			out <- &OpLogEvent{
+				Id:    lastEv.GetEventId(),
+				Event: "live",
+			}
+			// Switch to live update at the last operation id inserted before the replication
+			// was started
 			lastId = replicationFallbackId
 			lastEv = nil
 		}

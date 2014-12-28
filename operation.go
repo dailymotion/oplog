@@ -34,11 +34,6 @@ type ObjectState struct {
 	Data  *OperationData `bson:"data"`
 }
 
-type OperationEvent interface {
-	io.WriterTo
-	GetEventId() string
-}
-
 // GetEventId returns an SSE event id as string for the operation
 func (op Operation) GetEventId() string {
 	return op.Id.Hex()

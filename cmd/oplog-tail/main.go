@@ -43,8 +43,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ops := make(chan *consumer.Operation)
-	ack := make(chan *consumer.Operation)
+	ops := make(chan consumer.Operation)
+	ack := make(chan consumer.Operation)
 	go c.Process(ops, ack)
 	for {
 		op := <-ops

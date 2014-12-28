@@ -1,30 +1,27 @@
 # OpLog
 
-OpLog (for operation log) is a Go agent meant to be used as a data synchronization layer between a producer and consumers in a typical [SOA](http://en.wikipedia.org/wiki/Service-oriented_architecture) architecture. It can be seen as generic database replication system for web APIs.
+OpLog (for operation log) is an agent meant to be used as a data synchronization layer between a producer and consumers in a typical micro-services architecture. It can be seen as generic database replication system for web APIs.
 
-A typical use-case is to implement a public streaming API to monitor objects changes. With the use of [Server Sent Event](http://dev.w3.org/html5/eventsource/) and filtering, it might be used directly from the browser to monitor changes happening on objects shown on the page (à la [Meteor](https://www.meteor.com)).
+A typical use-case is when a component handles an authoritative database, and several independent components needs to keep an up-to-date read-only view of the data locally (i.e.: search engine indexing, recommendation engines, multi-regions architecture, etc.) or to react on certain changes (i.e.: spam detection, analytics, etc.).
 
-Another use-case is when a central component handles the central authoritative database, and several independent micro-components needs to keep an up-to-date read-only view of the data locally (i.e.: search engine index updating, recommendation engines, multi-regions architecture, etc.) or to react on certain changes (i.e.: spam detection, analytics, etc.).
+Another use-case is to implement a public streaming API to monitor objects changes on the service's model. With the use of [Server Sent Event](http://dev.w3.org/html5/eventsource/) and filtering, it might be used directly from the browser to monitor changes happening on objects shown on the page (à la [Meteor](https://www.meteor.com)).
 
-The agent can runs locally on every hosts of a cluster generating updates to a data store, and listen for UDP updates from the component describing every changes happening on the models.
+The agent can run locally on every nodes of a cluster producing updates to the data store. The agent receives updates via UDP from the producer application and forward them to a central data store. If the central data store is not available, updates are buffered in memory.
 
-The agent then exposes an [Server Sent Event](http://dev.w3.org/html5/eventsource/) API for consumers to be notified in real time about model changes. Thanks to the SSE protocol, a consumer can recover a connection breakage without loosing any updates.
+The agent also exposes a [Server Sent Event](http://dev.w3.org/html5/eventsource/) API for consumers to be notified in real time about model changes. Thanks to the SSE protocol, a consumer can recover a connection breakage without loosing any updates.
 
 A full replication is also supported for freshly spawned consumers that need to have a full view of the data.
 
-Change metadata are stored on a central MongoDB server. A tailable cursor on capped collection is used for real time updates and final state of objects are also maintained in a secondary collection for full replication. The actual data is not stored on this service, the monitor API stays the authoritative source of data. Only modified object `type` and `id` are stored together with timestamp of the update and some related "parent" objects references useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from an API.
+Change metadata are stored on a central MongoDB server. A tailable cursor on capped collection is used for real time updates and final state of objects are also maintained in a secondary collection for full replication. The actual data is not stored in the oplog, the monitored API stays the authoritative source of data. Only modified object's `type` and `id` are stored together with the timestamp of the update and some related "parent" object references, useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from their API.
 
 ## Install
 
-Because this repository is currently private, you may have to make sure git will use github using ssh if you are using 2FA. You can set this up with the following command:
-
-    git config --global url."git@github.com:".insteadOf "https://github.com/"
-
-Then to install the project, execute the following two commands:
+To install the project, execute the following commands:
 
     go get github.com/dailymotion/oplog
     go build -o /usr/local/bin/oplogd github.com/dailymotion/oplog/cmd/oplogd
     go build -o /usr/local/bin/oplog-sync github.com/dailymotion/oplog/cmd/oplog-sync
+    go build -o /usr/local/bin/oplog-tail github.com/dailymotion/oplog/cmd/oplog-tail
 
 ## Starting the agent
 
@@ -32,7 +29,7 @@ To start the agent, run the following command:
 
     oplogd --mongo-url mongodb://[username:password@]host1[:port1][,host2[:port2],...[,hostN[:portN]]]/database[?options]
 
-The `oplog` and `objects` collection will be created in the specified database.
+The `oplog` and `objects` collections will be created in the specified database.
 
 ## UDP API
 
@@ -56,15 +53,15 @@ The following keys are required:
 * `type`: The object type (i.e.: `video`, `user`, `playlist`, …)
 * `id`: The object id of the impacted object as string.
 
-See `examples/` directory for some implementation example in different languages.
+See `examples/` directory for implementation examples in different languages.
 
 ## Server Sent Event API
 
-The [SSE](http://dev.w3.org/html5/eventsource/) API runs on the same port as UDP API but using TCP. It means that agents have both input and output roles so it is easy to scale the service by putting an agent on every nodes of the source API cluster and expose their HTTP port via the same load balancer as the API while each nodes can send their updates to the UDP port on their localhost.
+The [SSE](http://dev.w3.org/html5/eventsource/) API runs on the same port as UDP API but in TCP. It means that agents have both input and output roles so it is easy to scale the service by putting an agent on every nodes of the source API cluster and expose their HTTP port via the same load balancer as the API while each nodes can send their updates to the UDP port on their localhost.
 
 The W3C SSE protocol is respected by the book. To connect to the API, a GET on `/` with the `Accept: text/event-stream` header is performed. If no `Last-Event-ID` HTTP header is passed, the oplog server will start sending all future events with no backlog. On each received event, the client must store the last event id as they are treated and submit it back to the server on reconnect using the `Last-Event-ID` HTTP header in order to resume the transfer where it has been interrupted.
 
-The client must ensure the `Last-Event-ID` header is sent back in the response. It may happen that the id defined by `Last-Event-ID` is no longer available in the underlaying capped collection. In such case, the agent won't send the backlog as if the `Last-Event-ID` header hadn't been sent, and the requested `Last-Event-ID` header won't be sent back in the response. You may want to perform a full replication when this happen.
+The client must ensure the `Last-Event-ID` header is sent back in the response. It may happen that the id defined by `Last-Event-ID` is no longer available in the underlaying capped collection. In such case, the agent won't send the backlog as if the `Last-Event-ID` header hadn't been sent. The requested `Last-Event-ID` header won't be sent back in the response either. You may want to perform a full replication when this happen.
 
 The following filters can be passed as query-string:
 * `types` A list of object types to filter on separated by comas (i.e.: `types=video,user`).
@@ -93,6 +90,10 @@ data: {"timestamp":"2014-11-06T03:04:40.091-08:00","parents":["x3kd2"],"type":"v
 If required, a full replication with all (not deleted) objects can be performed before streaming live updates. To perform a full replication, pass `0` as `Last-Event-ID`. Numeric event ids with 13 digits or less are considered as a replication id, which represent a milliseconds UNIX timestamp. By passing a millisecond timestamp, you are asking for replicating any objects that have been modified after this date. Passing `0` thus ensures every objects will be replicated.
 
 If a full replication is interrupted during the transfer, the same mechanism as for live updates is used. Once replication is done, the stream will automatically switch to live events stream so the consumer is ensured not to miss any updates.
+
+When a full replication starts, a special `reset` event is sent to signify the consumer that it should reset its database before applying the subsequent operations.
+
+Once the replication is done and the oplog switch back to the live updates, a special `live` event is sent. This event can be useful for a consumer to know when it is safe to be activated in production.
 
 ## Periodical Source Synchronization
 
@@ -165,8 +166,8 @@ func main() {
         log.Fatal(err)
     }
 
-    ops := make(chan *consumer.Operation)
-    ack := make(chan *consumer.Operation)
+    ops := make(chan consumer.Operation)
+    ack := make(chan consumer.Operation)
     go c.Process(ops, ack)
 
     for {

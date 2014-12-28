@@ -95,15 +95,7 @@ func Subscribe(url string, options Options) (*Consumer, error) {
 // The caller must then send operations back thru the ack channel once the operation has
 // been handled. Failing to ack the operations would prevent any resume in case of
 // connection failure or restart of the process.
-func (c *Consumer) Process(ops chan<- *Operation, ack <-chan *Operation) {
-	if c.lastId == "0" {
-		// On full replication, send a "reset" operation
-		ops <- &Operation{
-			ID:    "0",
-			Event: "reset",
-		}
-	}
-
+func (c *Consumer) Process(ops chan<- Operation, ack <-chan Operation) {
 	go func() {
 		d := NewDecoder(c.body)
 		op := Operation{}
@@ -127,12 +119,20 @@ func (c *Consumer) Process(ops chan<- *Operation, ack <-chan *Operation) {
 			}
 
 			c.ife.Push(op.ID)
-			ops <- &op
+			if op.Event == "reset" {
+				// We must not process any further operation until the "reset" operation
+				// is not acked
+				c.ife.mu.Lock()
+			}
+			ops <- op
 		}
 	}()
 
 	for {
 		op := <-ack
+		if op.Event == "reset" {
+			c.ife.mu.Unlock()
+		}
 		if found, first := c.ife.Pull(op.ID); found && first {
 			if c.options.StateFile != "" {
 				if err := c.saveLastEventID(op.ID); err != nil {

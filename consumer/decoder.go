@@ -3,6 +3,7 @@ package consumer
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 )
@@ -17,17 +18,23 @@ func NewDecoder(r io.Reader) *Decoder {
 
 // Next reads the next operation from a stream or block until one comes in.
 func (d *Decoder) Next(op *Operation) (err error) {
+	// Reset non reusable fields
+	op.Event = ""
+	op.Data = nil
+
 	var line string
+
 	for {
-		line, err = d.ReadString('\n')
-		if err != nil {
-			return
+		if line, err = d.ReadString('\n'); err != nil {
+			break
 		}
 		if line == "\n" {
-			break
+			// Message is complete, send it
+			return
 		}
 		line = strings.TrimSuffix(line, "\n")
 		if strings.HasPrefix(line, ":") {
+			// Comment, ignore
 			continue
 		}
 		sections := strings.SplitN(line, ":", 2)
@@ -43,10 +50,11 @@ func (d *Decoder) Next(op *Operation) (err error) {
 		case "data":
 			// The oplog does never return data on serveral lines
 			if err = json.Unmarshal([]byte(value), &op.Data); err != nil {
-				return
+				break
 			}
 		}
 	}
 
+	err = errors.New("Incomplete event")
 	return
 }
