@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -32,7 +31,7 @@ func NewUDPDaemon(addr string, ol *OpLog) *UDPDaemon {
 // The queueSize parameter defines the number of operation that can be queued before
 // the UDP server start throwing messages. This is particularly important to handle underlaying
 // MongoDB slowdowns or unavalability.
-func (daemon *UDPDaemon) Run(queueMaxSize uint64) error {
+func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 	udpAddr, err := net.ResolveUDPAddr("udp4", daemon.addr)
 	if err != nil {
 		return err
@@ -43,7 +42,7 @@ func (daemon *UDPDaemon) Run(queueMaxSize uint64) error {
 		return err
 	}
 
-	daemon.ol.Status.QueueMaxSize = queueMaxSize
+	daemon.ol.Status.QueueMaxSize.Set(queueMaxSize)
 	ops := make(chan *Operation, queueMaxSize)
 	go daemon.ol.Ingest(ops)
 
@@ -58,11 +57,11 @@ func (daemon *UDPDaemon) Run(queueMaxSize uint64) error {
 
 		log.Debugf("UDP received operation from UDP: %s", buffer[:n])
 
-		queueSize := uint64(len(ops))
-		atomic.StoreUint64(&daemon.ol.Status.QueueSize, queueSize)
+		queueSize := len(ops)
+		daemon.ol.Status.QueueSize.Set(queueSize)
 		if queueSize >= queueMaxSize {
 			log.Warnf("UDP input queue is full, thowing message: %s", buffer[:n])
-			atomic.AddUint64(&daemon.ol.Status.EventsDiscarded, 1)
+			daemon.ol.Status.EventsDiscarded.Incr()
 			continue
 		}
 
@@ -70,7 +69,7 @@ func (daemon *UDPDaemon) Run(queueMaxSize uint64) error {
 		err = json.Unmarshal(buffer[:n], &operation)
 		if err != nil {
 			log.Warnf("UDP invalid JSON recieved: %s", err)
-			atomic.AddUint64(&daemon.ol.Status.EventsError, 1)
+			daemon.ol.Status.EventsError.Incr()
 			continue
 		}
 
@@ -85,11 +84,11 @@ func (daemon *UDPDaemon) Run(queueMaxSize uint64) error {
 		}
 		if err := op.Validate(); err != nil {
 			log.Warnf("UDP invalid operation: %s", err)
-			atomic.AddUint64(&daemon.ol.Status.EventsError, 1)
+			daemon.ol.Status.EventsError.Incr()
 			continue
 		}
 
-		atomic.AddUint64(&daemon.ol.Status.EventsReceived, 1)
+		daemon.ol.Status.EventsReceived.Incr()
 		ops <- &op
 	}
 }

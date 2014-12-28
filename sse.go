@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync/atomic"
 
 	log "github.com/Sirupsen/logrus"
 )
@@ -127,13 +126,13 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	go daemon.ol.Tail(lastId, filter, ops, err)
-	atomic.AddInt64(&daemon.ol.Status.Clients, 1)
+	daemon.ol.Status.Clients.Incr()
 
 	for {
 		select {
 		case <-notifier.CloseNotify():
 			log.Info("SSE connection closed")
-			atomic.AddInt64(&daemon.ol.Status.Clients, -1)
+			daemon.ol.Status.Clients.Decr()
 			return
 		case err := <-err:
 			log.Warnf("SSE oplog error %s", err)

@@ -2,6 +2,8 @@ package oplog
 
 import "testing"
 
+// parseObjectId()
+
 func TestParseInvalidObjectId(t *testing.T) {
 	if parseObjectId("1419043454520") != nil {
 		t.Fail()
@@ -22,6 +24,8 @@ func TestParseValidObjectId(t *testing.T) {
 		t.Fail()
 	}
 }
+
+// parseTimestampId()
 
 func TestParseInvalidTimestamp(t *testing.T) {
 	if _, ok := parseTimestampId("141904345452a"); ok {
@@ -46,6 +50,8 @@ func TestParseZeroTimestamp(t *testing.T) {
 		t.Fail()
 	}
 }
+
+// Operation.Validate()
 
 func TestOperationValidate(t *testing.T) {
 	op := Operation{
@@ -80,6 +86,8 @@ func TestOperationValidateInvalidEventName(t *testing.T) {
 		t.Fail()
 	}
 }
+
+// OperationData.Validate()
 
 func TestOperationDataValidate(t *testing.T) {
 	opd := OperationData{
