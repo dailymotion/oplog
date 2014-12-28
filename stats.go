@@ -13,7 +13,8 @@ type gauge struct {
 	int64
 }
 
-type OpLogStatus struct {
+// Stats stores all the statistics about the oplog
+type Stats struct {
 	Status string `json:"status"`
 	// Total number of events recieved on the UDP interface
 	EventsReceived *counter `json:"events_received"`
@@ -31,8 +32,8 @@ type OpLogStatus struct {
 	Clients *gauge `json:"clients"`
 }
 
-func NewOpLogStatus() OpLogStatus {
-	return OpLogStatus{
+func NewStats() Stats {
+	return Stats{
 		Status:          "OK",
 		EventsReceived:  &counter{0},
 		EventsIngested:  &counter{0},

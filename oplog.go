@@ -15,8 +15,8 @@ import (
 )
 
 type OpLog struct {
-	s      *mgo.Session
-	Status *OpLogStatus
+	s     *mgo.Session
+	Stats *Stats
 }
 
 type OpLogFilter struct {
@@ -156,8 +156,8 @@ func NewOpLog(mongoURL string, maxBytes int) (*OpLog, error) {
 	if err != nil {
 		return nil, err
 	}
-	status := NewOpLogStatus()
-	oplog := &OpLog{session, &status}
+	stats := NewStats()
+	oplog := &OpLog{session, &stats}
 	oplog.init(maxBytes)
 	return oplog, nil
 }
@@ -203,7 +203,7 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 	for {
 		select {
 		case op := <-ops:
-			oplog.Status.QueueSize.Set(len(ops))
+			oplog.Stats.QueueSize.Set(len(ops))
 			oplog.Append(op, db)
 		}
 	}
@@ -246,7 +246,7 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 		}
 		break
 	}
-	oplog.Status.EventsIngested.Incr()
+	oplog.Stats.EventsIngested.Incr()
 }
 
 // Diff finds which objects must be created or deleted in order to fix the delta

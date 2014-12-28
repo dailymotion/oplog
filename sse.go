@@ -67,7 +67,7 @@ func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (daemon *SSEDaemon) Status(w http.ResponseWriter, r *http.Request) {
-	status, err := json.Marshal(daemon.ol.Status)
+	status, err := json.Marshal(daemon.ol.Stats)
 	if err != nil {
 		w.WriteHeader(500)
 		return
@@ -126,13 +126,13 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	go daemon.ol.Tail(lastId, filter, ops, err)
-	daemon.ol.Status.Clients.Incr()
+	daemon.ol.Stats.Clients.Incr()
 
 	for {
 		select {
 		case <-notifier.CloseNotify():
 			log.Info("SSE connection closed")
-			daemon.ol.Status.Clients.Decr()
+			daemon.ol.Stats.Clients.Decr()
 			return
 		case err := <-err:
 			log.Warnf("SSE oplog error %s", err)
