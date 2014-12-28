@@ -4,15 +4,15 @@ OpLog (for operation log) is a Go agent meant to be used as a data synchronizati
 
 A typical use-case is to implement a public streaming API to monitor objects changes. With the use of [Server Sent Event](http://dev.w3.org/html5/eventsource/) and filtering, it might be used directly from the browser to monitor changes happening on objects shown on the page (à la [Meteor](https://www.meteor.com)).
 
-Another use-case is when a central component handles the central authoritative database, and several independent micro-components needs to keep an up-to-date read-only view of the data locally for performance purpose (i.e.: in multi-regions architecture) or to react on certain changes (i.e.: spam detection, search engine index updating, recommendation engines, analytics, etc.).
+Another use-case is when a central component handles the central authoritative database, and several independent micro-components needs to keep an up-to-date read-only view of the data locally (i.e.: search engine index updating, recommendation engines, multi-regions architecture, etc.) or to react on certain changes (i.e.: spam detection, analytics, etc.).
 
 The agent can runs locally on every hosts of a cluster generating updates to a data store, and listen for UDP updates from the component describing every changes happening on the models.
 
-The agent then exposes an [Server Sent Event](http://dev.w3.org/html5/eventsource/) API for consumers to be notified in real time about model changes. Thanks to the SSE protocol, a consumer can recover a connection breakage without loosing any update.
+The agent then exposes an [Server Sent Event](http://dev.w3.org/html5/eventsource/) API for consumers to be notified in real time about model changes. Thanks to the SSE protocol, a consumer can recover a connection breakage without loosing any updates.
 
 A full replication is also supported for freshly spawned consumers that need to have a full view of the data.
 
-Change metadata are stored on a central MongoDB server. A tailable cursor on capped collection is used for real time update and final state of objects are also maintained in a secondary collection for full replication. The actual data is not stored on this service, the monitor API stays the authoritative source of data. Only modified object `type` and `id` are stored together with timestamp of the update and some related "parent" objects references useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from an API.
+Change metadata are stored on a central MongoDB server. A tailable cursor on capped collection is used for real time updates and final state of objects are also maintained in a secondary collection for full replication. The actual data is not stored on this service, the monitor API stays the authoritative source of data. Only modified object `type` and `id` are stored together with timestamp of the update and some related "parent" objects references useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from an API.
 
 ## Install
 
