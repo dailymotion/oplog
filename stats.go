@@ -32,6 +32,7 @@ type Stats struct {
 	Clients *gauge `json:"clients"`
 }
 
+// NewStats create a new empty stats object
 func NewStats() Stats {
 	return Stats{
 		Status:          "OK",
@@ -49,6 +50,7 @@ func (c *counter) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.FormatUint(c.uint64, 10)), nil
 }
 
+// Incr atomically increment the counter by 1
 func (c *counter) Incr() {
 	atomic.AddUint64(&c.uint64, 1)
 }
@@ -57,14 +59,17 @@ func (g *gauge) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.FormatInt(g.int64, 10)), nil
 }
 
+// Set atomically set the gauge value to the provided int
 func (g *gauge) Set(val int) {
 	atomic.StoreInt64(&g.int64, int64(val))
 }
 
+// Incr atomically increment the gauge by 1
 func (g *gauge) Incr() {
 	atomic.AddInt64(&g.int64, 1)
 }
 
+// Incr atomically decrement the gauge by 1
 func (g *gauge) Decr() {
 	atomic.AddInt64(&g.int64, -1)
 }
