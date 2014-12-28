@@ -1,14 +1,18 @@
 # OpLog
 
-OpLog (for operation log) is a Go agent meant to be used as a data synchronization layer between a producer component and one or more consumer components in a typical [SOA](http://en.wikipedia.org/wiki/Service-oriented_architecture) architecture. It can be seen as generic database replication system at the application logic layer.
+OpLog (for operation log) is a Go agent meant to be used as a data synchronization layer between a producer and consumers in a typical [SOA](http://en.wikipedia.org/wiki/Service-oriented_architecture) architecture. It can be seen as generic database replication system for web APIs.
 
-A typical use-case is when a central component handles the central authoritative database, and several independent micro-components needs to keep an up-to-date read-only view of the data locally for performance purpose (i.e.: in multi-regions architecture).
+A typical use-case is to implement a public streaming API to monitor objects changes. With the use of [Server Sent Event](http://dev.w3.org/html5/eventsource/) and filtering, it might be used directly from the browser to monitor changes happening on objects shown on the page (à la [Meteor](https://www.meteor.com)).
 
-The agent runs locally on every hosts of a cluster generating updates to a data store, and listen for UDP updates from the component describing every changes happening on the models.
+Another use-case is when a central component handles the central authoritative database, and several independent micro-components needs to keep an up-to-date read-only view of the data locally for performance purpose (i.e.: in multi-regions architecture) or to react on certain changes (i.e.: spam detection, search engine index updating, recommendation engines, analytics, etc.).
+
+The agent can runs locally on every hosts of a cluster generating updates to a data store, and listen for UDP updates from the component describing every changes happening on the models.
 
 The agent then exposes an [Server Sent Event](http://dev.w3.org/html5/eventsource/) API for consumers to be notified in real time about model changes. Thanks to the SSE protocol, a consumer can recover a connection breakage without loosing any update.
 
-A full replication is also supported for freshly spawned consumers that need to initialize their database from scratch.
+A full replication is also supported for freshly spawned consumers that need to have a full view of the data.
+
+Change metadata are stored on a central MongoDB server. A tailable cursor on capped collection is used for real time update and final state of objects are also maintained in a secondary collection for full replication. The actual data is not stored on this service, the monitor API stays the authoritative source of data. Only modified object `type` and `id` are stored together with timestamp of the update and some related "parent" objects references useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from an API.
 
 ## Install
 
@@ -28,7 +32,7 @@ To start the agent, run the following command:
 
     oplogd --mongo-url mongodb://[username:password@]host1[:port1][,host2[:port2],...[,hostN[:portN]]]/database[?options]
 
-The `oplog` and `objects` collection will be created in the provided database.
+The `oplog` and `objects` collection will be created in the specified database.
 
 ## UDP API
 
@@ -39,28 +43,30 @@ The format of the message is as follow:
 ```javascript
 {
     "event": "insert",
-    "parents": ["user/x1234"],
+    "parents": ["video/xk32jd", "user/xkjdi"],
     "type": "video",
-    "id": "x345",
+    "id": "xk32jd",
 }
 ```
 
-All keys are required:
+The following keys are required:
 
 * `event`: The type of event. Can be `insert`, `update` or `delete`.
-* `parents`: The list of parent objects of the modified object formated as `type/id`.
-* `type`: The object type (i.e.: `video`, `user`, `playlist`…)
+* `parents`: The list of parent objects of the modified object. The advised format for items of this list is `type/id` but any format is acceptable. It is generally a good idea to put a reference to the modified object itself in this list in order to easily let the consumers filter on any updates performed on the object.
+* `type`: The object type (i.e.: `video`, `user`, `playlist`, …)
 * `id`: The object id of the impacted object as string.
 
 ## Server Sent Event API
 
-The SSE API runs on the same port as UDP API but using TCP. The W3C SSE protocol is respected by the book. To connect to the API, a GET on `/` with the `Accept: text/event-stream` header is performed.
+The [SSE](http://dev.w3.org/html5/eventsource/) API runs on the same port as UDP API but using TCP. It means that agents have both input and output roles so it is easy to scale the service by putting an agent on every nodes of the source API cluster and expose their HTTP port via the same load balancer as the API while each nodes can send their updates to the UDP port on their localhost.
 
-On each received event, the client must store the last event id and submit it back to the server on reconnect using the `Last-Event-ID` HTTP header in order to resume the transfer where it has been left. The client must then ensure the `Last-Event-ID` header is sent back in the response. It may happen that the id defined by `Last-Event-ID` is no longer available, in this case, the agent won't send the backlog and will ignore the `Last-Event-ID` header. You may want to perform a full replication in such a case.
+The W3C SSE protocol is respected by the book. To connect to the API, a GET on `/` with the `Accept: text/event-stream` header is performed. If no `Last-Event-ID` HTTP header is passed, the oplog server will start sending all future events with no backlog. On each received event, the client must store the last event id as they are treated and submit it back to the server on reconnect using the `Last-Event-ID` HTTP header in order to resume the transfer where it has been interrupted.
+
+The client must ensure the `Last-Event-ID` header is sent back in the response. It may happen that the id defined by `Last-Event-ID` is no longer available in the underlaying capped collection. In such case, the agent won't send the backlog as if the `Last-Event-ID` header hadn't been sent, and the requested `Last-Event-ID` header won't be sent back in the response. You may want to perform a full replication when this happen.
 
 The following filters can be passed as query-string:
 * `types` A list of object types to filter on separated by comas (i.e.: `types=video,user`).
-* `parents` A coma separated list of `type/id` to filter on
+* `parents` A coma separated list of parents to filter on (i.e.: `parents=video/xk32jd,user/xkjdi`
 
 ```
 GET / HTTP/1.1
@@ -88,12 +94,7 @@ If a full replication is interrupted during the transfer, the same mechanism as 
 
 ## Periodical Source Synchronization
 
-There is many ways for the oplog to miss some updates and thus have an incorrect view of the current state of the source database. In order to cope with this issue, a regular synchronization process with the source database content can be performed. The sync is a separate process which compares a dump of the real database with what the oplog have stored in its own database. For any discrepancies which is anterior to the dump in the oplog's db, the process will generate an appropriate event in the oplog to fix the delta.
-
-The sync process is performed in two phases:
-
-1. The first phase look for every objects present in the dump, and try to find the same item in the oplog database. If the object is missing or is flagged as deleted, a `create` event is generated to rectify the oplog db status and notify the consumers.
-2. The second phase search for any item present in the oplog database and not marked as deleted but not present in the dump and generate a `delete` event for them.
+There is many ways for the oplog to miss some updates and thus have an incorrect view of the current state of the source data. In order to cope with this issue, a regular synchronization process with the source data content can be performed. The sync is a separate process which compares a dump of the real data with what the oplog have stored in its own database. For any discrepancies **which is anterior** to the dump in the oplog's database, the process will generate an appropriate event in the oplog to fix the delta on both its own database as well as for all consumers.
 
 The dump must be in a streamable JSON format. Each line is a JSON object with the same schema as of the `data` part of the SEE API response.
 Dump example:
@@ -181,4 +182,6 @@ func main() {
 }
 ```
 
-The ack mechanism allows you to handle operation in parallel without loosing track of which operation has been handled in case of connection failure recovery.
+The ack mechanism allows you to handle operation in parallel without loosing track of which operation has been handled in case of a connection failure recovery.
+
+See `cmd/oplog-tail/` for another usage example.
