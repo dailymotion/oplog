@@ -12,8 +12,7 @@ import (
 
 var (
 	password  = flag.String("password", "", "Password to access the oplog.")
-	stateFile = flag.String("state-file", "", "Path to the state file storing the oplog position id")
-	reset     = flag.Bool("reset", false, "Perform a full replication")
+	stateFile = flag.String("state-file", "", "Path to the state file storing the oplog position id (default: no store)")
 	types     = flag.String("types", "", "Comma seperated list of types to filter on")
 	parents   = flag.String("parents", "", "Comma seperated list of parents type/id to filter on")
 )
@@ -38,7 +37,6 @@ func main() {
 	c, err := consumer.Subscribe(url, consumer.Options{
 		StateFile: *stateFile,
 		Password:  *password,
-		Reset:     *reset,
 		Filter:    f,
 	})
 	if err != nil {

@@ -9,21 +9,19 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path"
 	"strings"
 	"time"
 )
 
 // Options is the subscription options
 type Options struct {
-	// Path of the state file where to persiste the current oplog position
+	// Path of the state file where to persiste the current oplog position.
+	// If empty string, the state is not stored.
 	StateFile string
 	// Password to access password protected oplog
 	Password string
 	// Filters to apply on the oplog output
 	Filter Filter
-	// Reset removes any saved state and forces a full replication
-	Reset bool
 }
 
 // Filter contains arguments to filter the oplog output
@@ -53,14 +51,6 @@ var ErrorAccessDenied = errors.New("Invalid credentials")
 // generate errors, the Process method will try to reconnect until the server
 // is reachable again.
 func Subscribe(url string, options Options) (*Consumer, error) {
-	if options.StateFile == "" {
-		options.StateFile = path.Join(os.TempDir(), "oplog.state")
-	}
-
-	if options.Reset {
-		os.Remove(options.StateFile)
-	}
-
 	qs := ""
 	if len(options.Filter.Parents) > 0 {
 		parents := strings.Join(options.Filter.Parents, ",")
@@ -144,8 +134,10 @@ func (c *Consumer) Process(ops chan<- *Operation, ack <-chan *Operation) {
 	for {
 		op := <-ack
 		if found, first := c.ife.Pull(op.ID); found && first {
-			if err := c.saveLastEventID(op.ID); err != nil {
-				log.Fatalf("Can't persist last event ID processed: %v", err)
+			if c.options.StateFile != "" {
+				if err := c.saveLastEventID(op.ID); err != nil {
+					log.Fatalf("Can't persist last event ID processed: %v", err)
+				}
 			}
 			c.lastId = op.ID
 		}
@@ -194,6 +186,9 @@ func (c *Consumer) connect() (err error) {
 }
 
 func (c *Consumer) loadLastEventID() (id string, err error) {
+	if c.options.StateFile == "" {
+		return "", nil
+	}
 	_, err = os.Stat(c.options.StateFile)
 	if os.IsNotExist(err) {
 		// full replication
