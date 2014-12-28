@@ -65,6 +65,9 @@ func main() {
 		if err := json.Unmarshal(scanner.Bytes(), &obd); err != nil {
 			log.Fatalf("SYNC dump unmarshaling error at line %d: %s", line, err)
 		}
+		if err := obd.Validate(); err != nil {
+			log.Fatalf("SYNC invalid operation at line %d: %s", line, err)
+		}
 		createMap[obd.GetId()] = obd
 	}
 	if err := scanner.Err(); err != nil {

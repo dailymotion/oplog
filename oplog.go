@@ -3,6 +3,7 @@ package oplog
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -100,6 +101,15 @@ func (op Operation) GetEventId() string {
 	return op.Id.Hex()
 }
 
+func (op Operation) Validate() error {
+	switch op.Event {
+	case "create", "update", "delete":
+	default:
+		return fmt.Errorf("invalid event name: %s", op.Event)
+	}
+	return op.Data.Validate()
+}
+
 // WriteTo serializes an Operation as a SSE compatible message
 func (op Operation) WriteTo(w io.Writer) (int64, error) {
 	data, err := json.Marshal(op.Data)
@@ -140,6 +150,21 @@ func (obd OperationData) GetId() string {
 	b.WriteString("/")
 	b.WriteString(obd.Id)
 	return b.String()
+}
+
+func (obd OperationData) Validate() error {
+	if obd.Id == "" {
+		return errors.New("missing id field")
+	}
+	if obd.Type == "" {
+		return errors.New("missing type field")
+	}
+	for _, parent := range obd.Parents {
+		if parent == "" {
+			return errors.New("parent can't be empty")
+		}
+	}
+	return nil
 }
 
 // NewOpLog returns an OpLog connected to the given provided mongo URL.

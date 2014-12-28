@@ -74,8 +74,7 @@ func (daemon *UDPDaemon) Run(queueMaxSize uint64) error {
 			continue
 		}
 
-		atomic.AddUint64(&daemon.ol.Status.EventsReceived, 1)
-		ops <- &Operation{
+		op := Operation{
 			Event: strings.ToLower(operation.Event),
 			Data: &OperationData{
 				Timestamp: time.Now(),
@@ -84,5 +83,13 @@ func (daemon *UDPDaemon) Run(queueMaxSize uint64) error {
 				Id:        operation.Id,
 			},
 		}
+		if err := op.Validate(); err != nil {
+			log.Warnf("UDP invalid operation: %s", err)
+			atomic.AddUint64(&daemon.ol.Status.EventsError, 1)
+			continue
+		}
+
+		atomic.AddUint64(&daemon.ol.Status.EventsReceived, 1)
+		ops <- &op
 	}
 }
