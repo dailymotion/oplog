@@ -217,3 +217,7 @@ func main() {
 The ack mechanism allows you to handle operation in parallel without loosing track of which operation has been handled in case of a connection failure recovery.
 
 See `cmd/oplog-tail/` for another usage example.
+
+## Licenses
+
+All source code is licensed under the [MIT License](https://raw.github.com/dailymotion/oplog/master/LICENSE).
