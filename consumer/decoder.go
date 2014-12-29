@@ -16,7 +16,7 @@ func NewDecoder(r io.Reader) *Decoder {
 	return &Decoder{bufio.NewReader(r)}
 }
 
-// Next reads the next operation from a stream or block until one comes in.
+// Next reads the next operation from a SSE stream or block until one comes in.
 func (d *Decoder) Next(op *Operation) (err error) {
 	// Reset non reusable fields
 	op.Event = ""

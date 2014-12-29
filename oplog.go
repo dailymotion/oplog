@@ -26,6 +26,7 @@ type GenericEvent interface {
 	GetEventId() string
 }
 
+// OpLogEvent is used to send "technical" events with no data like "reset" or "live"
 type OpLogEvent struct {
 	Id    string
 	Event string
@@ -82,6 +83,7 @@ func New(mongoURL string, maxBytes int) (*OpLog, error) {
 	return oplog, nil
 }
 
+// DB returns the Mongo database object used by the oplog
 func (oplog *OpLog) DB() *mgo.Database {
 	return oplog.s.Copy().DB("")
 }
