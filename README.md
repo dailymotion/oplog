@@ -31,6 +31,15 @@ To start the agent, run the following command:
 
 The `oplog` and `objects` collections will be created in the specified database.
 
+Available options:
+
+* `--capped-collection-size=104857600`: Size of the created MongoDB capped collection size in bytes (default 100MB).
+* `--debug=false`: Show debug log messages.
+* `--listen=":8042"`: The address to listen on. Same address is used for both SSE(HTTP) and UDP APIs.
+* `--max-queued-events=100000`: Number of events to queue before starting throwing up UDP messages.
+* `--mongo-url`: MongoDB URL to connect to.
+* `--password`: Password protecting the global SSE stream.
+
 ## UDP API
 
 To send operation events to the agent, an UDP datagram containing a JSON object must be crafted and sent on the agent's UDP port (8042 by default).
