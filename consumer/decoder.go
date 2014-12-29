@@ -8,6 +8,15 @@ import (
 	"strings"
 )
 
+// ErrIncompleteEvent is returned when the decoder only recieved a partial event
+var ErrIncompleteEvent = errors.New("incomplete event")
+
+// ErrInvalidEvent is returned when the decoder was not able to unmarshal the event
+var ErrInvalidEvent = errors.New("invalid event")
+
+// ErrConnectionClosed when the SSE stream has closed unexpectedly
+var ErrConnectionClosed = errors.New("connection closed")
+
 type Decoder struct {
 	*bufio.Reader
 }
@@ -26,6 +35,7 @@ func (d *Decoder) Next(op *Operation) (err error) {
 
 	for {
 		if line, err = d.ReadString('\n'); err != nil {
+			err = ErrConnectionClosed
 			break
 		}
 		if line == "\n" {
@@ -50,11 +60,15 @@ func (d *Decoder) Next(op *Operation) (err error) {
 		case "data":
 			// The oplog does never return data on serveral lines
 			if err = json.Unmarshal([]byte(value), &op.Data); err != nil {
+				err = ErrInvalidEvent
 				break
 			}
 		}
 	}
 
-	err = errors.New("Incomplete event")
+	if err == nil && op.Event == "" {
+		err = ErrIncompleteEvent
+	}
+
 	return
 }

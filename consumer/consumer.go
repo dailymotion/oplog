@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -54,17 +53,24 @@ type Consumer struct {
 	ife *InFlightEvents
 }
 
-// ErrorAccessDenied is returned by Subscribe when the oplog requires a password
+// ErrAccessDenied is returned by Subscribe when the oplog requires a password
 // different from the one provided in options.
-var ErrorAccessDenied = errors.New("Invalid credentials")
+var ErrAccessDenied = errors.New("invalid credentials")
+
+// ErrResumeFailed is returned when the requested last id was not found by the
+// oplog server. This may happen when the last id is very old or size of the
+// oplog capped collection is too small for the load.
+//
+// When this error happen, the consumer may choose to either ignore the lost events
+// or force a full replication.
+var ErrResumeFailed = errors.New("resume failed")
+
+// ErrorWritingState is returned when the last processed id can't be written to
+// the state file.
+var ErrWritingState = errors.New("writing state file failed")
 
 // Subscribe creates a Consumer to connect to the given URL.
-//
-// If the oplog is password protected and invalid credentials has been set,
-// the ErrorAccessDenied will be returned. Any other connection errors won't
-// generate errors, the Process() method will try to reconnect until the server
-// is reachable again.
-func Subscribe(url string, options Options) (*Consumer, error) {
+func Subscribe(url string, options Options) *Consumer {
 	qs := ""
 	if len(options.Filter.Parents) > 0 {
 		parents := strings.Join(options.Filter.Parents, ",")
@@ -93,21 +99,7 @@ func Subscribe(url string, options Options) (*Consumer, error) {
 		mu:      &sync.RWMutex{},
 	}
 
-	// Recover the last event id saved from a previous excution
-	lastId, err := c.loadLastEventID()
-	if err != nil {
-		return nil, err
-	}
-	c.lastId = lastId
-
-	// Try to connect, if a 403 or 401 is returned, return an error
-	// otherwise ignore any other error as Process() will retry in loop
-	// until the oplog becomes available.
-	if err := c.connect(); err == ErrorAccessDenied {
-		return nil, err
-	}
-
-	return c, nil
+	return c
 }
 
 // Process reads the oplog output and send operations back thru the given ops channel.
@@ -115,69 +107,127 @@ func Subscribe(url string, options Options) (*Consumer, error) {
 // been handled. Failing to ack the operations would prevent any resume in case of
 // connection failure or restart of the process.
 //
-// Note that some non recoverable errors may throw a fatal error.
-func (c *Consumer) Process(ops chan<- Operation, ack <-chan Operation) {
-	go func() {
-		d := NewDecoder(c.body)
-		op := Operation{}
-		for {
-			err := d.Next(&op)
-			if err != nil {
-				log.Printf("OPLOG error: %s", err)
-				backoff := time.Second
-				for {
-					time.Sleep(backoff)
-					if err = c.connect(); err == nil {
-						d = NewDecoder(c.body)
-						break
-					}
-					log.Printf("OPLOG conn error: %s", err)
-					if backoff < 30*time.Second {
-						backoff *= 2
-					}
-				}
-				continue
-			}
+// Any errors are return on the errs channel. In all cases, the Process() method will
+// try to reconnect and/or ignore the error. It is the callers responsability to send
+// true into the stop channel in order to end the loop.
+//
+// When the loop has ended, a message is sent thru the done channel.
+func (c *Consumer) Process(ops chan<- Operation, ack <-chan Operation, errs chan<- error, stop <-chan bool, done chan<- bool) {
+	// Recover the last event id saved from a previous excution
+	lastId, err := c.loadLastEventID()
+	if err != nil {
+		errs <- err
+		return
+	}
+	c.lastId = lastId
 
-			c.ife.Push(op.ID)
-			if op.Event == "reset" {
-				// We must not process any further operation until the "reset" operation
-				// is not acked
-				c.ife.Lock()
-			}
-			ops <- op
-		}
-	}()
+	wg := sync.WaitGroup{}
+
+	// SSE stream reading
+	stopReadStream := make(chan bool, 1)
+	wg.Add(1)
+	go c.readStream(ops, errs, stopReadStream, &wg)
 
 	// Periodic (non blocking) saving of the last id when needed
+	stopStateSaving := make(chan bool, 1)
 	if c.options.StateFile != "" {
-		go func() {
-			for {
-				time.Sleep(time.Second)
-				c.mu.RLock()
-				saved := c.saved
-				lastId := c.lastId
-				c.mu.RUnlock()
-				if saved {
-					continue
-				}
-				if err := c.saveLastEventID(lastId); err != nil {
-					log.Fatalf("OPLOG can't persist last event ID processed: %v", err)
-				}
-				c.mu.Lock()
-				c.saved = lastId == c.lastId
-				c.mu.Unlock()
-			}
-		}()
+		wg.Add(1)
+		go c.periodicStateSaving(errs, stopStateSaving, &wg)
 	}
 
 	for {
-		op := <-ack
-		if op.Event == "reset" {
-			c.ife.Unlock()
+		select {
+		case <-stop:
+			// If a stop is requested, we ensure all go routines are stopped
+			stopReadStream <- true
+			stopStateSaving <- true
+			if c.body != nil {
+				// Closing the body will ensure readStream isn't blocked in IO wait
+				c.body.Close()
+			}
+			wg.Wait()
+			done <- true
+			return
+		case op := <-ack:
+			if op.Event == "reset" {
+				c.ife.Unlock()
+			}
+			if found, first := c.ife.Pull(op.ID); found && first {
+				c.SetLastId(op.ID)
+			}
 		}
-		if found, first := c.ife.Pull(op.ID); found && first {
-			c.setLastId(op.ID)
+	}
+}
+
+// readStream maintains a connection to the oplog stream and read sent events as they are coming
+func (c *Consumer) readStream(ops chan<- Operation, errs chan<- error, stop <-chan bool, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	c.connect()
+	d := NewDecoder(c.body)
+	op := Operation{}
+	for {
+		err := d.Next(&op)
+		select {
+		case <-stop:
+			return
+		default:
+			// proceed
+		}
+		if err != nil {
+			errs <- err
+			backoff := time.Second
+			for {
+				time.Sleep(backoff)
+				if err = c.connect(); err == nil {
+					d = NewDecoder(c.body)
+					break
+				}
+				errs <- err
+				if backoff < 30*time.Second {
+					backoff *= 2
+				}
+			}
+			continue
+		}
+
+		c.ife.Push(op.ID)
+		if op.Event == "reset" {
+			// We must not process any further operation until the "reset" operation
+			// is not acke
+			c.ife.Lock()
+		}
+		select {
+		case <-stop:
+			return
+		default:
+			ops <- op
+		}
+	}
+}
+
+// periodicStateSaving saves the lastId into a file every seconds if it has been updated
+func (c *Consumer) periodicStateSaving(errs chan<- error, stop <-chan bool, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-time.After(time.Second):
+			c.mu.RLock()
+			saved := c.saved
+			lastId := c.lastId
+			c.mu.RUnlock()
+			if saved {
+				continue
+			}
+			if err := c.saveLastEventID(lastId); err != nil {
+				errs <- ErrWritingState
+			}
+			c.mu.Lock()
+			c.saved = lastId == c.lastId
+			c.mu.Unlock()
 		}
 	}
 }
@@ -189,8 +239,8 @@ func (c *Consumer) LastId() string {
 	return c.lastId
 }
 
-// setLastId sets the last id to the given value and informs the save go routine
-func (c *Consumer) setLastId(id string) {
+// SetLastId sets the last id to the given value and informs the save go routine
+func (c *Consumer) SetLastId(id string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lastId = id
@@ -227,11 +277,11 @@ func (c *Consumer) connect() (err error) {
 		// header, it means the resume did fail. This is not a recoverable
 		// error, the operator must either decide to perform a full replication
 		// or accept to loose events by truncating the state file.
-		log.Fatal("OPLOG resume failed")
+		err = ErrResumeFailed
 		return
 	}
 	if res.StatusCode == 403 || res.StatusCode == 401 {
-		err = ErrorAccessDenied
+		err = ErrAccessDenied
 		return
 	}
 	if res.StatusCode != 200 {

@@ -34,26 +34,45 @@ func main() {
 		Types:   strings.Split(*types, ","),
 		Parents: strings.Split(*parents, ","),
 	}
-	c, err := consumer.Subscribe(url, consumer.Options{
+	c := consumer.Subscribe(url, consumer.Options{
 		StateFile: *stateFile,
 		Password:  *password,
 		Filter:    f,
 	})
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	ops := make(chan consumer.Operation)
 	ack := make(chan consumer.Operation)
-	go c.Process(ops, ack)
+	errs := make(chan error)
+	stop := make(chan bool)
+	done := make(chan bool)
+	go c.Process(ops, ack, errs, stop, done)
 	for {
-		op := <-ops
-		if op.Data == nil {
-			fmt.Printf("%s #%s\n", op.Event, op.ID)
-		} else {
-			fmt.Printf("%s: %s #%s %s/%s (%s)\n",
-				op.Data.Timestamp, op.Event, op.ID, op.Data.Type, op.Data.ID, strings.Join(op.Data.Parents, ", "))
+		select {
+		case op := <-ops:
+			if op.Data == nil {
+				fmt.Printf("%s #%s\n", op.Event, op.ID)
+			} else {
+				fmt.Printf("%s: %s #%s %s/%s (%s)\n",
+					op.Data.Timestamp, op.Event, op.ID, op.Data.Type, op.Data.ID, strings.Join(op.Data.Parents, ", "))
+			}
+			ack <- op
+		case err := <-errs:
+			switch err {
+			case consumer.ErrAccessDenied, consumer.ErrWritingState:
+				stop <- true
+				log.Fatal(err)
+			case consumer.ErrResumeFailed:
+				if *stateFile != "" {
+					log.Print("Resume failed, forcing full replication")
+					c.SetLastId("0")
+				} else {
+					log.Print(err)
+				}
+			default:
+				log.Print(err)
+			}
+		case <-done:
+			return
 		}
-		ack <- op
 	}
 }

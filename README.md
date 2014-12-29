@@ -170,19 +170,37 @@ func main() {
 
     ops := make(chan consumer.Operation)
     ack := make(chan consumer.Operation)
-    go c.Process(ops, ack)
+    errs := make(chan error)
+    stop := make(chan bool)
+    done := make(chan bool)
+    go c.Process(ops, ack, errs, stop, done)
 
     for {
-        // Get the next operation
-        op := <-ops
+        select {
+        case op := <-ops:
+            // Get the next operation
+            op := <-ops
 
-        // Do something with the operation
-        url := fmt.Sprintf("http://api.domain.com/%s/%s", op.Data.Type, op.Data.ID)
-        data := MyAPIGetter(url)
-        MyDataSyncer(data)
+            // Do something with the operation
+            url := fmt.Sprintf("http://api.domain.com/%s/%s", op.Data.Type, op.Data.ID)
+            data := MyAPIGetter(url)
+            MyDataSyncer(data)
 
-        // Ack the fact you handled the operation
-        ack <- op
+            // Ack the fact you handled the operation
+            ack <- op
+        case err := <-errs:
+            switch err {
+            case consumer.ErrAccessDenied, consumer.ErrWritingState:
+                stop <- true
+                log.Fatal(err)
+            case consumer.ErrResumeFailed:
+                log.Print("Resume failed, forcing full replication")
+                c.SetLastId("0")
+            default:
+                log.Print(err)
+            }
+        case <-done:
+            return
     }
 }
 ```
