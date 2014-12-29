@@ -122,7 +122,7 @@ func (c *Consumer) Process(ops chan<- Operation, ack <-chan Operation) {
 			if op.Event == "reset" {
 				// We must not process any further operation until the "reset" operation
 				// is not acked
-				c.ife.mu.Lock()
+				c.ife.Lock()
 			}
 			ops <- op
 		}
@@ -131,7 +131,7 @@ func (c *Consumer) Process(ops chan<- Operation, ack <-chan Operation) {
 	for {
 		op := <-ack
 		if op.Event == "reset" {
-			c.ife.mu.Unlock()
+			c.ife.Unlock()
 		}
 		if found, first := c.ife.Pull(op.ID); found && first {
 			if c.options.StateFile != "" {
