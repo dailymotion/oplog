@@ -260,8 +260,9 @@ func (oplog *OpLog) LastId() string {
 	return ""
 }
 
-// tail creates a tail cursor starting at a given id
-func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*mgo.Iter, bool) {
+// iter creates either an iterator on the objects collection if the lastId is a timestamp
+// or tailable cursor on the oplog capped collection otherwise
+func (oplog *OpLog) iter(db *mgo.Database, lastId string, filter OpLogFilter) (iter *mgo.Iter, streaming bool) {
 	query := bson.M{}
 	if len(filter.Types) > 0 {
 		query["data.t"] = bson.M{"$in": filter.Types}
@@ -276,7 +277,8 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 			query["data.ts"] = bson.M{"$gte": time.Unix(0, ts*1000000)}
 		}
 		query["event"] = bson.M{"$ne": "delete"}
-		return db.C("objects").Find(query).Sort("data.ts").Iter(), true
+		iter = db.C("objects").Find(query).Sort("data.ts").Iter()
+		streaming = false
 	} else {
 		oid := parseObjectId(lastId)
 		if oid == nil {
@@ -286,8 +288,10 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 		if oid != nil {
 			query["_id"] = bson.M{"$gt": oid}
 		}
-		return db.C("oplog").Find(query).Sort("$natural").Tail(-1), false
+		iter = db.C("oplog").Find(query).Sort("$natural").Tail(-1)
+		streaming = true
 	}
+	return
 }
 
 // Tail tails all the new operations in the oplog and send the operation in
@@ -305,11 +309,7 @@ func (oplog *OpLog) tail(db *mgo.Database, lastId string, filter OpLogFilter) (*
 // sent thru the err channel.
 func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.WriterTo, err chan<- error) {
 	db := oplog.DB()
-	operation := Operation{}
-	object := ObjectState{}
 	var lastEv GenericEvent
-	var replicationFallbackId string
-	iter, replication := oplog.tail(db, lastId, filter)
 
 	if lastId == "0" {
 		// When full replication is requested, start by sending a "reset" event to instruct
@@ -323,49 +323,59 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 	}
 
 	for {
-		if replication {
-			log.Debug("OPLOG start replication")
-			// Capture the current oplog position in order to resume at this position
-			// once initial replication is done
-			replicationFallbackId = oplog.LastId()
-			for iter.Next(&object) {
-				out <- object
-				lastEv = object
-			}
-		} else {
+		iter, streaming := oplog.iter(db, lastId, filter)
+
+		if streaming {
 			log.Debug("OPLOG start live updates")
+
+			operation := Operation{}
 			for iter.Next(&operation) {
 				out <- operation
 				lastEv = operation
 			}
+
+			if iter.Err() != nil {
+				log.Warnf("OPLOG tail failed with error, try to reconnect: %s", iter.Err())
+			}
+		} else {
+			log.Debug("OPLOG start replication")
+			// Capture the current oplog position in order to resume at this position
+			// once initial replication is done
+			replicationFallbackId := oplog.LastId()
+
+			object := ObjectState{}
+			for iter.Next(&object) {
+				out <- object
+				lastEv = object
+			}
+
+			if iter.Err() != nil {
+				log.Warnf("OPLOG replication failed with error, try to reconnect: %s", iter.Err())
+			} else {
+				// Replication is done, notify and swtich to live event stream
+				//
+				// Send a "live" operation to inform the consumer it is no live event stream.
+				// We use the last event id here in order to ensure the consumer will resume
+				// the replication starting at this point in time in case of a failure after
+				// the "live" event.
+				out <- &OpLogEvent{
+					Id:    lastEv.GetEventId(),
+					Event: "live",
+				}
+				// Switch to live update at the last operation id inserted before the replication
+				// was started
+				lastId = replicationFallbackId
+				lastEv = nil
+			}
 		}
 
-		// Try to reconnect
-		if !replication {
-			log.Warnf("OPLOG tail failed with error, try to reconnect: %s", iter.Err())
-		} else if iter.Err() == nil {
-			// Replication is down, notify and swtich to live event stream
-			//
-			// Send a "live" operation to inform the consumer it is no live event stream.
-			// We use the last event id here in order to ensure the consumer will resume
-			// the replication starting at this point in time in case of a failure after
-			// the "live" event.
-			out <- &OpLogEvent{
-				Id:    lastEv.GetEventId(),
-				Event: "live",
-			}
-			// Switch to live update at the last operation id inserted before the replication
-			// was started
-			lastId = replicationFallbackId
-			lastEv = nil
-		}
+		// Prepare for reconnect
 		iter.Close()
 		db.Session.Close()
 		db = oplog.DB()
 		if lastEv != nil {
 			lastId = lastEv.GetEventId()
 		}
-		iter, replication = oplog.tail(db, lastId, filter)
 		time.Sleep(time.Second)
 	}
 }
