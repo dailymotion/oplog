@@ -44,8 +44,8 @@ type Consumer struct {
 	lastId string
 	// saved is true when current lastId is persisted
 	saved bool
-	// mtx is a mutex used to coordinate access to lastId and saved properties
-	mtx *sync.RWMutex
+	// mu is a mutex used to coordinate access to lastId and saved properties
+	mu *sync.RWMutex
 	// http is the client used to connect to the oplog
 	http http.Client
 	// body points to the current streamed response body
@@ -90,7 +90,7 @@ func Subscribe(url string, options Options) (*Consumer, error) {
 		url:     strings.Join([]string{url, qs}, ""),
 		options: options,
 		ife:     NewInFlightEvents(),
-		mtx:     &sync.RWMutex{},
+		mu:      &sync.RWMutex{},
 	}
 
 	// Recover the last event id saved from a previous excution
@@ -154,19 +154,19 @@ func (c *Consumer) Process(ops chan<- Operation, ack <-chan Operation) {
 		go func() {
 			for {
 				time.Sleep(time.Second)
-				c.mtx.RLock()
+				c.mu.RLock()
 				saved := c.saved
 				lastId := c.lastId
-				c.mtx.RUnlock()
+				c.mu.RUnlock()
 				if saved {
 					continue
 				}
 				if err := c.saveLastEventID(lastId); err != nil {
 					log.Fatalf("OPLOG can't persist last event ID processed: %v", err)
 				}
-				c.mtx.Lock()
+				c.mu.Lock()
 				c.saved = lastId == c.lastId
-				c.mtx.Unlock()
+				c.mu.Unlock()
 			}
 		}()
 	}
@@ -184,15 +184,15 @@ func (c *Consumer) Process(ops chan<- Operation, ack <-chan Operation) {
 
 // LastId returns the most advanced acked event id
 func (c *Consumer) LastId() string {
-	c.mtx.RLock()
-	defer c.mtx.RUnlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.lastId
 }
 
 // setLastId sets the last id to the given value and informs the save go routine
 func (c *Consumer) setLastId(id string) {
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.lastId = id
 	c.saved = false
 }
