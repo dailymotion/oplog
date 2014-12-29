@@ -97,7 +97,7 @@ Once the replication is done and the oplog switch back to the live updates, a sp
 
 ## Periodical Source Synchronization
 
-There is many ways for the oplog to miss some updates and thus have an incorrect view of the current state of the source data. In order to cope with this issue, a regular synchronization process with the source data content can be performed. The sync is a separate process which compares a dump of the real data with what the oplog have stored in its own database. For any discrepancies **which is anterior** to the dump in the oplog's database, the process will generate an appropriate event in the oplog to fix the delta on both its own database as well as for all consumers.
+There is many ways for the oplog to miss some updates and thus have an incorrect view of the current state of the source data. In order to cope with this issue, a regular synchronization process with the source data content can be performed. The sync is a separate process which compares a dump of the real data with what the oplog have stored in its own database. For any discrepancies **which is anterior** to the dump in the oplog's database, the process will generate an appropriate event in the oplog to fix the delta on both its own database and for all consumers.
 
 The dump must be in a streamable JSON format. Each line is a JSON object with the same schema as of the `data` part of the SEE API response.
 Dump example:
@@ -112,6 +112,8 @@ Dump example:
 The `timestamp` must represent the last modification date of the object as an RFC 3339 representation.
 
 The `oplog-sync` command is used with this dump in order to perform the sync. This command will connect to the database, do the comparisons and generate the necessary oplog events to fix the deltas.
+
+BE CAREFUL, any object not present in the dump having a timestamp lower than the most recent timestamp present in the dump will be deleted from the oplog.
 
 
 ## Status Endpoint
