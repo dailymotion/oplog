@@ -173,11 +173,13 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 
 // Diff finds which objects must be created or deleted in order to fix the delta
 //
-// The createMap points to a map pointing to all objects present in the source database.
+// The createMap is a map pointing to all objects present in the source database.
 // The function search of differences between the passed map and the oplog database and
-// objects present on both sides from the createMap and populate the deleteMap with objects
-// that are present in the oplog database but not in the source database.
-func (oplog *OpLog) Diff(createMap OperationDataMap, deleteMap OperationDataMap) error {
+// remove objects identical in both sides from the createMap and populate the deleteMap
+// with objects that are present in the oplog database but not in the source database.
+// If an object is present in both createMap and the oplog database but timestamp of the
+// oplog object is earlier than createMap's, the object is added to the updateMap.
+func (oplog *OpLog) Diff(createMap OperationDataMap, updateMap OperationDataMap, deleteMap OperationDataMap) error {
 	db := oplog.DB()
 	defer db.Session.Close()
 
@@ -193,9 +195,13 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, deleteMap OperationDataMap)
 	defer db.Session.Close()
 	iter := db.C("objects").Find(bson.M{"event": bson.M{"$ne": "delete"}}).Iter()
 	for iter.Next(&obs) {
-		if _, ok := createMap[obs.Id]; ok {
+		if opd, ok := createMap[obs.Id]; ok {
 			// Object exists on both sides, remove it from the create map
 			delete(createMap, obs.Id)
+			// If the dump object is newer than oplog's, add it to the update map
+			if obs.Data.Timestamp.Before(opd.Timestamp) {
+				updateMap[obs.Id] = opd
+			}
 		} else {
 			// The object only exists in the oplog db, add it to the delete map
 			// if the timestamp of the found object is older than oldest object
@@ -203,6 +209,7 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, deleteMap OperationDataMap)
 			// have been created between the dump creation and the sync.
 			if obs.Data.Timestamp.Before(dumpTime) {
 				deleteMap[obs.Id] = *obs.Data
+				delete(createMap, obs.Id)
 			}
 		}
 	}

@@ -10,10 +10,11 @@ import (
 )
 
 type UDPOperation struct {
-	Event   string   `json:"event"`
-	Parents []string `json:"parents"`
-	Type    string   `json:"type"`
-	Id      string   `json:"id"`
+	Event     string     `json:"event"`
+	Parents   []string   `json:"parents"`
+	Type      string     `json:"type"`
+	Id        string     `json:"id"`
+	Timestamp *time.Time `json:"timestamp,omniempty"`
 }
 
 // UDPDaemon listens for events and send them to the oplog MongoDB capped collection
@@ -73,10 +74,18 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 			continue
 		}
 
+		// The timestamp field is optional
+		var timestamp time.Time
+		if operation.Timestamp != nil {
+			timestamp = *operation.Timestamp
+		} else {
+			timestamp = time.Now()
+		}
+
 		op := Operation{
 			Event: strings.ToLower(operation.Event),
 			Data: &OperationData{
-				Timestamp: time.Now(),
+				Timestamp: timestamp,
 				Parents:   operation.Parents,
 				Type:      strings.ToLower(operation.Type),
 				Id:        operation.Id,

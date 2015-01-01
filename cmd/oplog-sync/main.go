@@ -54,6 +54,7 @@ func main() {
 	}
 	fh.Seek(0, 0)
 	createMap := make(oplog.OperationDataMap, lines)
+	updateMap := make(oplog.OperationDataMap)
 	deleteMap := make(oplog.OperationDataMap)
 
 	// Load dump in memory
@@ -75,22 +76,24 @@ func main() {
 	}
 
 	// Scan the oplog db and generate the diff
-	if err := ol.Diff(createMap, deleteMap); err != nil {
+	if err := ol.Diff(createMap, updateMap, deleteMap); err != nil {
 		log.Fatalf("SYNC diff error: %s", err)
 	}
 
 	// Generate events to fix the delta
 	db := ol.DB()
 	op := &oplog.Operation{Event: "create"}
-	for _, obd := range createMap {
-		op.Data = &obd
-		ol.Append(op, db)
+	genEvents := func(opMap oplog.OperationDataMap) {
+		for _, obd := range opMap {
+			op.Data = &obd
+			ol.Append(op, db)
+		}
 	}
+	genEvents(createMap)
+	op.Event = "update"
+	genEvents(updateMap)
 	op.Event = "delete"
-	for _, obd := range deleteMap {
-		op.Data = &obd
-		ol.Append(op, db)
-	}
+	genEvents(deleteMap)
 }
 
 func lineCounter(r io.Reader) (int, error) {

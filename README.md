@@ -68,6 +68,8 @@ The following keys are required:
 * `type`: The object type (i.e.: `video`, `user`, `playlist`, …)
 * `id`: The object id of the impacted object as string.
 
+The `timestamp` field is optional. It must contains the date when the object has been updated as RFC 3339 representation. If not provided, the time when the update has been received by the agent is used instead.
+
 See `examples/` directory for implementation examples in different languages.
 
 ## Server Sent Event API
@@ -126,10 +128,9 @@ Dump example:
 
 The `timestamp` must represent the last modification date of the object as an RFC 3339 representation.
 
-The `oplog-sync` command is used with this dump in order to perform the sync. This command will connect to the database, do the comparisons and generate the necessary oplog events to fix the deltas.
+The `oplog-sync` command is used with this dump in order to perform the sync. This command will connect to the database, do the comparisons and generate the necessary oplog events to fix the deltas. This command does not need an `oplogd` agent to be running.
 
-BE CAREFUL, any object not present in the dump having a timestamp lower than the most recent timestamp present in the dump will be deleted from the oplog.
-
+BE CAREFUL, any object absent of the dump having a timestamp lower than the most recent timestamp present in the dump will be deleted from the oplog.
 
 ## Status Endpoint
 
