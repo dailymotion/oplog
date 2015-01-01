@@ -8,11 +8,17 @@ Another use-case is to implement a public streaming API to monitor objects chang
 
 The agent can run locally on every nodes of a cluster producing updates to the data store. The agent receives updates via UDP from the producer application and forward them to a central data store. If the central data store is not available, updates are buffered in memory.
 
+![Flow](doc/flow.png)
+
 The agent also exposes a [Server Sent Event](http://dev.w3.org/html5/eventsource/) API for consumers to be notified in real time about model changes. Thanks to the SSE protocol, a consumer can recover a connection breakage without loosing any updates.
 
 A full replication is also supported for freshly spawned consumers that need to have a full view of the data.
 
 Change metadata are stored on a central MongoDB server. A tailable cursor on capped collection is used for real time updates and final state of objects are also maintained in a secondary collection for full replication. The actual data is not stored in the oplog, the monitored API stays the authoritative source of data. Only modified object's `type` and `id` are stored together with the timestamp of the update and some related "parent" object references, useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from their API.
+
+A typical deployment is to have a oplogd agent running locally on every node of a cluster serving the API to monitor. The agent serves both roles of tracking changes and serving changes to consumers. The same load balancer use to serve the API can expose the oplog SSE endpoint.
+
+![Architecture](doc/archi.png)
 
 ## Install
 
