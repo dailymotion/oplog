@@ -226,4 +226,4 @@ See `cmd/oplog-tail/` for another usage example.
 
 ## Licenses
 
-All source code is licensed under the [MIT License](https://raw.github.com/dailymotion/oplog/master/LICENSE).
+All source code is licensed under the [MIT License](LICENSE).
