@@ -47,9 +47,12 @@ func main() {
 	for {
 		select {
 		case op := <-ops:
-			if op.Data == nil {
-				fmt.Printf("%s #%s\n", op.Event, op.ID)
-			} else {
+			switch op.Event {
+			case "reset":
+				fmt.Print("** reset\n")
+			case "live":
+				fmt.Print("** live\n")
+			default:
 				fmt.Printf("%s: %s #%s %s/%s (%s)\n",
 					op.Data.Timestamp, op.Event, op.ID, op.Data.Type, op.Data.ID, strings.Join(op.Data.Parents, ", "))
 			}

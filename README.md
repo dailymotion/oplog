@@ -192,13 +192,18 @@ func main() {
     for {
         select {
         case op := <-ops:
-            // Get the next operation
-            op := <-ops
-
-            // Do something with the operation
-            url := fmt.Sprintf("http://api.domain.com/%s/%s", op.Data.Type, op.Data.ID)
-            data := MyAPIGetter(url)
-            MyDataSyncer(data)
+            // Got the next operation
+            switch op.Event {
+            case "reset":
+                // reset the data store
+            case "live":
+                // put the service back in production
+            default:
+                // Do something with the operation
+                url := fmt.Sprintf("http://api.domain.com/%s/%s", op.Data.Type, op.Data.ID)
+                data := MyAPIGetter(url)
+                MyDataSyncer(data)
+            }
 
             // Ack the fact you handled the operation
             op.Done()
