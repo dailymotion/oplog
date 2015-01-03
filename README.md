@@ -186,9 +186,8 @@ func main() {
 
     ops := make(chan consumer.Operation)
     errs := make(chan error)
-    stop := make(chan bool)
     done := make(chan bool)
-    go c.Process(ops, ack, errs, stop, done)
+    go c.Process(ops, errs, done)
 
     for {
         select {
@@ -206,7 +205,7 @@ func main() {
         case err := <-errs:
             switch err {
             case consumer.ErrAccessDenied, consumer.ErrWritingState:
-                stop <- true
+                c.Stop()
                 log.Fatal(err)
             case consumer.ErrResumeFailed:
                 log.Print("Resume failed, forcing full replication")

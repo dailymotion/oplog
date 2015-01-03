@@ -43,6 +43,8 @@ type Consumer struct {
 	lastId string
 	// saved is true when current lastId is persisted
 	saved bool
+	// processing is true when a process loop is in progress
+	processing bool
 	// mu is a mutex used to coordinate access to lastId and saved properties
 	mu *sync.RWMutex
 	// http is the client used to connect to the oplog
@@ -53,6 +55,8 @@ type Consumer struct {
 	ife *InFlightEvents
 	// ack is a channel to ack the operations
 	ack chan Operation
+	// stop is a channel used to stop the process loop
+	stop chan struct{}
 }
 
 // ErrAccessDenied is returned by Subscribe when the oplog requires a password
@@ -106,16 +110,27 @@ func Subscribe(url string, options Options) *Consumer {
 }
 
 // Process reads the oplog output and send operations back thru the given ops channel.
-// The caller must then send operations back thru the ack channel once the operation has
-// been handled. Failing to ack the operations would prevent any resume in case of
-// connection failure or restart of the process.
+// The caller must then call the Done() method on operation when it has been handled.
+// Failing to call Done() the operations would prevent any resume in case of connection
+// failure or restart of the process.
 //
 // Any errors are return on the errs channel. In all cases, the Process() method will
-// try to reconnect and/or ignore the error. It is the callers responsability to send
-// true into the stop channel in order to end the loop.
+// try to reconnect and/or ignore the error. It is the callers responsability to stop
+// the process loop by calling the Stop() method.
 //
 // When the loop has ended, a message is sent thru the done channel.
-func (c *Consumer) Process(ops chan<- Operation, errs chan<- error, stop <-chan bool, done chan<- bool) {
+func (c *Consumer) Process(ops chan<- Operation, errs chan<- error, done chan<- bool) {
+	// Ensure we never have more than one process loop running
+	if c.processing {
+		panic("Can't run two process loops in parallel")
+	}
+	c.processing = true
+
+	c.mu.Lock()
+	c.stop = make(chan struct{})
+	stop := c.stop
+	c.mu.Unlock()
+
 	// Recover the last event id saved from a previous excution
 	lastId, err := c.loadLastEventID()
 	if err != nil {
@@ -127,12 +142,12 @@ func (c *Consumer) Process(ops chan<- Operation, errs chan<- error, stop <-chan 
 	wg := sync.WaitGroup{}
 
 	// SSE stream reading
-	stopReadStream := make(chan bool, 1)
+	stopReadStream := make(chan struct{}, 1)
 	wg.Add(1)
 	go c.readStream(ops, errs, stopReadStream, &wg)
 
 	// Periodic (non blocking) saving of the last id when needed
-	stopStateSaving := make(chan bool, 1)
+	stopStateSaving := make(chan struct{}, 1)
 	if c.options.StateFile != "" {
 		wg.Add(1)
 		go c.periodicStateSaving(errs, stopStateSaving, &wg)
@@ -142,13 +157,14 @@ func (c *Consumer) Process(ops chan<- Operation, errs chan<- error, stop <-chan 
 		select {
 		case <-stop:
 			// If a stop is requested, we ensure all go routines are stopped
-			stopReadStream <- true
-			stopStateSaving <- true
+			close(stopReadStream)
+			close(stopStateSaving)
 			if c.body != nil {
 				// Closing the body will ensure readStream isn't blocked in IO wait
 				c.body.Close()
 			}
 			wg.Wait()
+			c.processing = false
 			done <- true
 			return
 		case op := <-c.ack:
@@ -162,8 +178,19 @@ func (c *Consumer) Process(ops chan<- Operation, errs chan<- error, stop <-chan 
 	}
 }
 
+// Stop instructs the Process() loop to stop
+func (c *Consumer) Stop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.stop != nil {
+		close(c.stop)
+		c.stop = nil
+	}
+}
+
 // readStream maintains a connection to the oplog stream and read sent events as they are coming
-func (c *Consumer) readStream(ops chan<- Operation, errs chan<- error, stop <-chan bool, wg *sync.WaitGroup) {
+func (c *Consumer) readStream(ops chan<- Operation, errs chan<- error, stop <-chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	c.connect()
@@ -211,7 +238,7 @@ func (c *Consumer) readStream(ops chan<- Operation, errs chan<- error, stop <-ch
 }
 
 // periodicStateSaving saves the lastId into a file every seconds if it has been updated
-func (c *Consumer) periodicStateSaving(errs chan<- error, stop <-chan bool, wg *sync.WaitGroup) {
+func (c *Consumer) periodicStateSaving(errs chan<- error, stop <-chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for {
