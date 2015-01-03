@@ -37,19 +37,18 @@ func (ife *InFlightEvents) Push(id string) {
 	ife.ids = append(ife.ids, id)
 }
 
-// Pull pulls the given id from the list if found and set a boolean as true
-// if it is the first element of the list.
-func (ife *InFlightEvents) Pull(id string) (found bool, first bool) {
+// Pull pulls the given id from the list and returns the index
+// of the pulled element in the queue. If the element wasn't found
+// the index is set to -1.
+func (ife *InFlightEvents) Pull(id string) (index int) {
 	ife.Lock()
 	defer ife.Unlock()
+	index = -1
 
-	for idx, eid := range ife.ids {
+	for i, eid := range ife.ids {
 		if eid == id {
-			found = true
-			if idx == 0 {
-				first = true
-			}
-			ife.ids = append(ife.ids[:idx], ife.ids[idx+1:]...)
+			index = i
+			ife.ids = append(ife.ids[:i], ife.ids[i+1:]...)
 			break
 		}
 	}

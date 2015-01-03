@@ -185,7 +185,6 @@ func main() {
     }
 
     ops := make(chan consumer.Operation)
-    ack := make(chan consumer.Operation)
     errs := make(chan error)
     stop := make(chan bool)
     done := make(chan bool)
@@ -203,7 +202,7 @@ func main() {
             MyDataSyncer(data)
 
             // Ack the fact you handled the operation
-            ack <- op
+            op.Done()
         case err := <-errs:
             switch err {
             case consumer.ErrAccessDenied, consumer.ErrWritingState:

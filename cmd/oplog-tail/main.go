@@ -41,11 +41,10 @@ func main() {
 	})
 
 	ops := make(chan consumer.Operation)
-	ack := make(chan consumer.Operation)
 	errs := make(chan error)
 	stop := make(chan bool)
 	done := make(chan bool)
-	go c.Process(ops, ack, errs, stop, done)
+	go c.Process(ops, errs, stop, done)
 	for {
 		select {
 		case op := <-ops:
@@ -55,7 +54,7 @@ func main() {
 				fmt.Printf("%s: %s #%s %s/%s (%s)\n",
 					op.Data.Timestamp, op.Event, op.ID, op.Data.Type, op.Data.ID, strings.Join(op.Data.Parents, ", "))
 			}
-			ack <- op
+			op.Done()
 		case err := <-errs:
 			switch err {
 			case consumer.ErrAccessDenied, consumer.ErrWritingState:

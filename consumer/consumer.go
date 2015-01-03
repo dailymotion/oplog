@@ -51,6 +51,8 @@ type Consumer struct {
 	body io.ReadCloser
 	// ife holds all event ids sent to the consumer but no yet acked
 	ife *InFlightEvents
+	// ack is a channel to ack the operations
+	ack chan Operation
 }
 
 // ErrAccessDenied is returned by Subscribe when the oplog requires a password
@@ -97,6 +99,7 @@ func Subscribe(url string, options Options) *Consumer {
 		options: options,
 		ife:     NewInFlightEvents(),
 		mu:      &sync.RWMutex{},
+		ack:     make(chan Operation),
 	}
 
 	return c
@@ -112,7 +115,7 @@ func Subscribe(url string, options Options) *Consumer {
 // true into the stop channel in order to end the loop.
 //
 // When the loop has ended, a message is sent thru the done channel.
-func (c *Consumer) Process(ops chan<- Operation, ack <-chan Operation, errs chan<- error, stop <-chan bool, done chan<- bool) {
+func (c *Consumer) Process(ops chan<- Operation, errs chan<- error, stop <-chan bool, done chan<- bool) {
 	// Recover the last event id saved from a previous excution
 	lastId, err := c.loadLastEventID()
 	if err != nil {
@@ -148,11 +151,11 @@ func (c *Consumer) Process(ops chan<- Operation, ack <-chan Operation, errs chan
 			wg.Wait()
 			done <- true
 			return
-		case op := <-ack:
+		case op := <-c.ack:
 			if op.Event == "reset" {
 				c.ife.Unlock()
 			}
-			if found, first := c.ife.Pull(op.ID); found && first {
+			if idx := c.ife.Pull(op.ID); idx == 0 {
 				c.SetLastId(op.ID)
 			}
 		}
@@ -166,6 +169,7 @@ func (c *Consumer) readStream(ops chan<- Operation, errs chan<- error, stop <-ch
 	c.connect()
 	d := NewDecoder(c.body)
 	op := Operation{}
+	op.ack = c.ack
 	for {
 		err := d.Next(&op)
 		select {
