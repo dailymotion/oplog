@@ -1,3 +1,10 @@
+// The oplog-tail command is a example implementation of the Go oplog consumer library.
+//
+// The tail command connects to an oplog agent and prints to the console any operation
+// sent thru it. A state-file can be provided to simulate a full replication and mainaining
+// the current state.
+//
+// Some filtering can be performed with "-types" and "-parents" options.
 package main
 
 import (

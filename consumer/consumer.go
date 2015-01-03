@@ -1,3 +1,4 @@
+// Package consumer provides an easy to use client interface for the oplog service.
 package consumer
 
 import (

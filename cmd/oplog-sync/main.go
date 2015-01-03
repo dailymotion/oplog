@@ -1,3 +1,25 @@
+// The oplog-sync command performs a maintaince operation on the oplog database to keep it
+// in sync with the source data.
+//
+// The command takes a dump of the source data as input and compares it with the oplog's data.
+// For any discrepency, a related oplog event is sent to rectify the oplog's database and all
+// its consumers.
+//
+// The dump must be in a streamable JSON format. Each line is a JSON object with the same schema
+// as of the data part of the SEE API response:
+//
+// 	{"timestamp":"2014-11-06T03:04:39.041-08:00", "parents": ["user/xl2d"], "type":"video", "id":"x34cd"}
+// 	{"timestamp":"2014-12-24T02:03:05.167+01:00", "parents": ["user/xkwek"], "type":"video", "id":"x12ab"}
+// 	{"timestamp":"2014-12-24T01:03:05.167Z", "parents": ["user/xkwek"], "type":"video", "id":"x54cd"}
+//
+// The timestamp must represent the last modification date of the object as an RFC 3339 representation.
+//
+// The oplog-sync command is used with this dump in order to perform the sync. This command will connect
+// to the database, do the comparisons and generate the necessary oplog events to fix the deltas. This
+// command does not need an oplogd agent to be running.
+//
+// BE CAREFUL, any object absent of the dump having a timestamp lower than the most recent timestamp
+// present in the dump will be deleted from the oplog.
 package main
 
 import (

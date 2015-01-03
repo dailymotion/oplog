@@ -1,3 +1,7 @@
+// The oplogd command is an agent listening on an UDP port for operations and exposing a
+// HTTP SSE API.
+//
+// See README file for more information.
 package main
 
 import (
@@ -16,6 +20,7 @@ var (
 	password             = flag.String("password", "", "Password protecting the global SSE stream.")
 )
 
+// Test
 func main() {
 	flag.Parse()
 

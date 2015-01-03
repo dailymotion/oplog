@@ -1,3 +1,8 @@
+// Package oplog provides a generic oplog/replication system for REST APIs.
+//
+// Most of the time, the oplog service is used thru the oplogd agent which uses this
+// package. But in the case your application is written in Go, you may want to integrate
+// at the code level.
 package oplog
 
 import (

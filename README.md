@@ -178,11 +178,7 @@ import (
 )
 
 func main() {
-    c, err := consumer.Subscribe(myOplogURL, consumer.Options{})
-
-    if err != nil {
-        log.Fatal(err)
-    }
+    c := consumer.Subscribe(myOplogURL, consumer.Options{})
 
     ops := make(chan consumer.Operation)
     errs := make(chan error)
@@ -220,6 +216,7 @@ func main() {
             }
         case <-done:
             return
+        }
     }
 }
 ```
