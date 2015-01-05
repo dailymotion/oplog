@@ -13,6 +13,7 @@ type Operation struct {
 type OperationData struct {
 	ID        string    `json:"id"`
 	Type      string    `json:"type"`
+	Ref       string    `json:"ref,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 	Parents   []string  `json:"parents"`
 }

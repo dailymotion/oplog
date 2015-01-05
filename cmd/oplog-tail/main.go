@@ -60,8 +60,13 @@ func main() {
 			case "live":
 				fmt.Print("** live\n")
 			default:
-				fmt.Printf("%s: %s #%s %s/%s (%s)\n",
-					op.Data.Timestamp, op.Event, op.ID, op.Data.Type, op.Data.ID, strings.Join(op.Data.Parents, ", "))
+				if op.Data.Ref == "" {
+					fmt.Printf("%s: %s #%s %s/%s (%s)\n",
+						op.Data.Timestamp, op.Event, op.ID, op.Data.Type, op.Data.ID, strings.Join(op.Data.Parents, ", "))
+				} else {
+					fmt.Printf("%s: %s #%s %s (%s)\n",
+						op.Data.Timestamp, op.Event, op.ID, op.Data.Ref, strings.Join(op.Data.Parents, ", "))
+				}
 			}
 			op.Done()
 		case err := <-errs:

@@ -19,6 +19,10 @@ import (
 type OpLog struct {
 	s     *mgo.Session
 	Stats *Stats
+	// ObjectURL is a template URL to be used to generate reference URL to operation's objects.
+	// The URL can use {{type}} and {{id}} template as follow: http://api.mydomain.com/{{type}}/{{id}}.
+	// If not provided, no "ref" field will be included in oplog events.
+	ObjectURL string
 }
 
 type OpLogFilter struct {
@@ -83,7 +87,10 @@ func New(mongoURL string, maxBytes int) (*OpLog, error) {
 		return nil, err
 	}
 	stats := NewStats()
-	oplog := &OpLog{session, &stats}
+	oplog := &OpLog{
+		s:     session,
+		Stats: &stats,
+	}
 	oplog.init(maxBytes)
 	return oplog, nil
 }
@@ -344,6 +351,9 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 
 			operation := Operation{}
 			for iter.Next(&operation) {
+				if oplog.ObjectURL != "" {
+					operation.Data.genRef(oplog.ObjectURL)
+				}
 				out <- operation
 				lastEv = operation
 			}
@@ -359,6 +369,9 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 
 			object := ObjectState{}
 			for iter.Next(&object) {
+				if oplog.ObjectURL != "" {
+					object.Data.genRef(oplog.ObjectURL)
+				}
 				out <- object
 				lastEv = object
 			}

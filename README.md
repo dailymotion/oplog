@@ -1,10 +1,10 @@
 # OpLog
 
-OpLog (for operation log) is an agent meant to be used as a data synchronization layer between a producer and consumers in a typical micro-services architecture. It can be seen as generic database replication system for web APIs.
+OpLog (for operation log) is an agent meant to be used as a data real-time synchronization layer between a producer and consumers where producer is generally a REST API. It can be seen as generic database replication system for web APIs.
 
 A typical use-case is when a component handles an authoritative database, and several independent components needs to keep an up-to-date read-only view of the data locally (i.e.: search engine indexing, recommendation engines, multi-regions architecture, etc.) or to react on certain changes (i.e.: spam detection, analytics, etc.).
 
-Another use-case is to implement a public streaming API to monitor objects changes on the service's model. With the use of [Server Sent Event](http://dev.w3.org/html5/eventsource/) and filtering, it might be used directly from the browser to monitor changes happening on objects shown on the page (à la [Meteor](https://www.meteor.com)).
+Another use-case is to implement a public streaming API to monitor objects changes on the service's model. With the use of [Server Sent Event](http://dev.w3.org/html5/eventsource/) and filtering, it might be used directly from the browser to monitor changes happening on objects shown on the page (à la [Meteor](https://www.meteor.com)) or from a native mobile application to keep an up-to-date offline view of the data.
 
 The agent can run locally on every nodes of a cluster producing updates to the data store. The agent receives updates via UDP from the producer application and forward them to a central data store. If the central data store is not available, updates are buffered in memory.
 
@@ -14,7 +14,7 @@ The agent also exposes a [Server Sent Event](http://dev.w3.org/html5/eventsource
 
 A full replication is also supported for freshly spawned consumers that need to have a full view of the data.
 
-Change metadata are stored on a central MongoDB server. A tailable cursor on capped collection is used for real time updates and final state of objects are also maintained in a secondary collection for full replication. The actual data is not stored in the oplog, the monitored API stays the authoritative source of data. Only modified object's `type` and `id` are stored together with the timestamp of the update and some related "parent" object references, useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from their API.
+Change metadata are stored on a central MongoDB server. A tailable cursor on capped collection is used for real time updates and final state of objects are also maintained in a secondary collection for full replication support. The actual data is not stored in the oplog, the monitored API stays the authoritative source of data. Only modified object's `type` and `id` are stored together with the timestamp of the update and some related "parent" object references, useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from their API. An option reference to the modified object can provided by the oplog API if the URL schema is setup.
 
 A typical deployment is to have a oplogd agent running locally on every node of a cluster serving the API to monitor. The agent serves both roles of tracking changes and serving changes to consumers. The same load balancer use to serve the API can expose the oplog SSE endpoint.
 
@@ -44,6 +44,7 @@ Available options:
 * `--listen=":8042"`: The address to listen on. Same address is used for both SSE(HTTP) and UDP APIs.
 * `--max-queued-events=100000`: Number of events to queue before starting throwing up UDP messages.
 * `--mongo-url`: MongoDB URL to connect to.
+* `--object-url`: An URL template to reference objects. If this option is set, SSE events will have an "ref" field with the URL to the object. The URL should contain {{type}} and {{id}} variables (i.e.: http://api.mydomain.com/{{type}}/{{id}})
 * `--password`: Password protecting the global SSE stream.
 
 ## UDP API

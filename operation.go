@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/mgo.v2/bson"
@@ -25,6 +26,7 @@ type OperationData struct {
 	Parents   []string  `bson:"p" json:"parents"`
 	Type      string    `bson:"t" json:"type"`
 	Id        string    `bson:"id" json:"id"`
+	Ref       string    `bson:"-,omitempty" json:"ref,omitempty"`
 }
 
 // ObjectState is the current state of an object given the most recent operation applied on it
@@ -80,6 +82,18 @@ func (obj ObjectState) WriteTo(w io.Writer) (int64, error) {
 	}
 	n, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", obj.GetEventId(), obj.Event, data)
 	return int64(n), err
+}
+
+// genRef generates the reference URL (Ref field) from the given object URL template based on
+// the Type and Id fields.
+func (obd *OperationData) genRef(objectURL string) {
+	if objectURL == "" {
+		obd.Ref = ""
+		return
+	}
+
+	r := strings.NewReplacer("{{type}}", obd.Type, "{{id}}", obd.Id)
+	obd.Ref = r.Replace(objectURL)
 }
 
 func (obd OperationData) GetId() string {

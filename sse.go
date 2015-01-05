@@ -12,8 +12,9 @@ import (
 
 // SSEDaemon listens for events and send them to the oplog MongoDB capped collection
 type SSEDaemon struct {
-	s        *http.Server
-	ol       *OpLog
+	s  *http.Server
+	ol *OpLog
+	// Password is the shared secret to connect to a password protected oplog.
 	Password string
 }
 
