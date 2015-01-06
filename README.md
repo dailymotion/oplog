@@ -1,24 +1,28 @@
 # OpLog
 
-OpLog (for operation log) is an agent meant to be used as a data real-time synchronization layer between a producer and consumers where producer is generally a REST API. It can be seen as generic database replication system for web APIs.
+OpLog (for operation log) is an agent meant to be used as a real-time data synchronization layer between a producer and consumers where producer is generally a REST API. It can be seen as generic database replication system for web APIs or as an easy way to add a public streaming API to an existing API.
 
 A typical use-case is when a component handles an authoritative database, and several independent components needs to keep an up-to-date read-only view of the data locally (i.e.: search engine indexing, recommendation engines, multi-regions architecture, etc.) or to react on certain changes (i.e.: spam detection, analytics, etc.).
 
 Another use-case is to implement a public streaming API to monitor objects changes on the service's model. With the use of [Server Sent Event](http://dev.w3.org/html5/eventsource/) and filtering, it might be used directly from the browser to monitor changes happening on objects shown on the page (à la [Meteor](https://www.meteor.com)) or from a native mobile application to keep an up-to-date offline view of the data.
 
-The agent can run locally on every nodes of a cluster producing updates to the data store. The agent receives updates via UDP from the producer application and forward them to a central data store. If the central data store is not available, updates are buffered in memory.
+The agent may run locally on every nodes of a cluster producing updates to the oplog. The agent receives updates via UDP from the producer application and forward them to a central oplog's data store (a MongoDb cluster). If the central data store is not available, updates are buffered in memory, waiting for the database cluster to be available again.
 
 ![Flow](doc/flow.png)
 
-The agent also exposes a [Server Sent Event](http://dev.w3.org/html5/eventsource/) API for consumers to be notified in real time about model changes. Thanks to the SSE protocol, a consumer can recover a connection breakage without loosing any updates.
+The agent also exposes a [Server Sent Event](http://dev.w3.org/html5/eventsource/) API for consumers to be notified in real time about model changes. Thanks to the SSE protocol, a consumer can recover a connection breakage without loosing any updates by using the `Last-Event-ID` HTTP header.
 
 A full replication is also supported for freshly spawned consumers that need to have a full view of the data.
 
-Change metadata are stored on a central MongoDB server. A tailable cursor on capped collection is used for real time updates and final state of objects are also maintained in a secondary collection for full replication support. The actual data is not stored in the oplog, the monitored API stays the authoritative source of data. Only modified object's `type` and `id` are stored together with the timestamp of the update and some related "parent" object references, useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from their API. An option reference to the modified object can provided by the oplog API if the URL schema is setup.
+Change operations are stored on a central MongoDB server. A tailable cursor on capped collection is used for real time updates and final stats of objects are also maintained in a secondary collection for full replication support. The actual data is not stored in the oplog data store ; the monitored API stays the authoritative source of data. Only modified object's `type` and `id` are stored together with the timestamp of the update and some related "parent" object references, useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from their API. An optional reference to the modified object can provided by the oplog API if the URL schema is setup (see oplogd options below).
 
-A typical deployment is to have a oplogd agent running locally on every node of a cluster serving the API to monitor. The agent serves both roles of tracking changes and serving changes to consumers. The same load balancer use to serve the API can expose the oplog SSE endpoint.
+A typical deployment is to have a oplogd agent running locally on every node of a cluster serving the API to monitor. The agent serves both roles of tracking changes and streaming changes to consumers. The same load balancer use to serve the API can expose the oplog SSE endpoint.
 
 ![Architecture](doc/archi.png)
+
+Another deployment choice may be to separate the SSE API from the event ingestion. This can be very easily done by running a separated cluster of oplogd.
+
+![Architecture](doc/archi2.png)
 
 ## Install
 
@@ -135,7 +139,7 @@ BE CAREFUL, any object absent of the dump having a timestamp lower than the most
 
 ## Status Endpoint
 
-The agent exposes a `/status` endpoint over HTTP to show some statistics about the itself. A JSON object is returned with the following fields:
+The agent exposes a `/status` endpoint over HTTP to show some statistics about itself. A JSON object is returned with the following fields:
 
 * `events_received`: Total number of events received on the UDP interface
 * `events_ingested`: Total number of events ingested into MongoDB with success
@@ -167,7 +171,7 @@ Date: Thu, 06 Nov 2014 10:40:25 GMT
 
 ## Consumer
 
-To write a consumer you may use any SSE library and consume the API by ourself. If your consumer is written in Go, a dedicated consumer library is provided.
+To write a consumer you may use any SSE library and consume the API by yourself. If your consumer is written in Go, a dedicated consumer library is provided.
 
 Here is an example of Go consumer using the provided consumer library:
 
