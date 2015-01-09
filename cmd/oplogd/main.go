@@ -18,7 +18,7 @@ var (
 	cappedCollectionSize = flag.Int("capped-collection-size", 104857600, "Size of the created MongoDB capped collection size in bytes (default 100MB).")
 	maxQueuedEvents      = flag.Int("max-queued-events", 100000, "Number of events to queue before starting throwing UDP messages.")
 	password             = flag.String("password", "", "Password protecting the global SSE stream.")
-	objectURL            = flag.String("object-url", "", "An URL template to reference objects. If this option is set, SSE events will have an \"ref\" field with the URL to the object. The URL should contain {{type}} and {{id}} variables (i.e.: http://api.mydomain.com/{{type}}/{{id}})")
+	objectURL            = flag.String("object-url", "", "A URL template to reference objects. If this option is set, SSE events will have an \"ref\" field with the URL to the object. The URL should contain {{type}} and {{id}} variables (i.e.: http://api.mydomain.com/{{type}}/{{id}})")
 )
 
 // Test

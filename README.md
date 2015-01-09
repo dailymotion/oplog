@@ -1,12 +1,13 @@
 # REST Operation Log
 
-OpLog is an agent meant to be used as a real-time data synchronization layer between a producer and consumers where producer is generally a REST API. It can be seen as generic database replication system for web APIs or as an easy way to add a public streaming API to an existing API.
+OpLog is used as a real-time data synchronization layer between a producer (generally a REST API) and consumers. Basically, it's a generic database replication system for web APIs or an easy way to add a public streaming capability to an existing API.
 
-A typical use-case is when a component handles an authoritative database, and several independent components needs to keep an up-to-date read-only view of the data locally (i.e.: search engine indexing, recommendation engines, multi-regions architecture, etc.) or to react on certain changes (i.e.: spam detection, analytics, etc.).
+Typical use cases:
 
-Another use-case is to implement a public streaming API to monitor objects changes on the service's model. With the use of [Server Sent Event](http://dev.w3.org/html5/eventsource/) and filtering, it might be used directly from the browser to monitor changes happening on objects shown on the page (à la [Meteor](https://www.meteor.com)) or from a native mobile application to keep an up-to-date offline view of the data.
+* A component handles an authoritative database and several independent components need to keep locally an up-to-date read-only view of the data (e.g.: search engine indexing, recommendation engines, multi-regions architecture, etc.) or to react to certain changes (i.e.: spam detection, analytics, etc.).
+* Implement a public streaming API to monitor changes to objects within the service's model. With the use of [Server Sent Event](http://dev.w3.org/html5/eventsource/) and filtering, it might be used directly from the browser to monitor changes that occur on objects displayed on the page (à la [Meteor](https://www.meteor.com)) or from a native mobile application to keep an up-to-date offline view of the data.
 
-The agent may run locally on same nodes/containers as the API/application producing updates to the data model. The agent receives notifications of updates (operations) via UDP from the producer application and forward them to the central oplog's data store (a MongoDb cluster). If the central data store is not available, operations are buffered in memory, waiting for the database cluster to be available again.
+The agent may run locally on same nodes/containers as the API/application producing updates to the data model. The agent receives notifications of updates (operations) via UDP from the producer application and forwards them to the central oplog's data store (a MongoDb cluster). If the central data store is not available, operations are buffered in memory, waiting for the database cluster to be available again.
 
 ![Flow](doc/flow.png)
 
@@ -14,11 +15,11 @@ The agent also exposes a [Server Sent Event](http://dev.w3.org/html5/eventsource
 
 A [full replication] is also supported for freshly spawned consumers that need to have a full view of the data.
 
-Change operations are stored on a central MongoDB server. A [tailable cursor](http://docs.mongodb.org/manual/tutorial/create-tailable-cursor/) on a MongoDB [capped collection](http://docs.mongodb.org/manual/core/capped-collections) is used for real-time updates and final stats of objects are also maintained in a secondary collection for full replication support. The actual data is not stored in the oplog data store ; the monitored API stays the authoritative source of data. Only modified object's `type` and `id` are stored together with the timestamp of the update and some related "parent" object references, useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from their API. An optional reference to the modified object can provided by the oplog API if the URL schema is setup (see [Starting the agent] below for more info).
+Change operations are stored on a central MongoDB server. A [tailable cursor](http://docs.mongodb.org/manual/tutorial/create-tailable-cursor/) on a MongoDB [capped collection](http://docs.mongodb.org/manual/core/capped-collections) is used for real-time updates and final stats of objects is maintained in a secondary collection for full replication support. The actual data is not stored in the OpLog's data store ; the monitored API continues to serve as the authoritative source of data and as the gatekeeper for it (authen/authz). Only modified object's `type` and `id` are stored together with the timestamp of the update and some related "parent" object references, useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from their API. An optional reference to the modified object can be provided by the OpLog API if the URL schema is setup (see [Starting the agent] below for more info).
 
-As the it is highly expected that the oplog may miss some operation from the API, a [Periodical Source Synchronization] mechanism is available
+As the it is highly expected that the OpLog may miss some operations from the API, a [Periodical Source Synchronization] mechanism is available
 
-A typical deployment is to have a oplogd agent running locally on every node of a cluster serving the API to monitor. The agent serves both roles of ingesting operations coming from the API and streaming aggregated operation of all agents to consumers. The same load balancer use to serve the API can expose the oplog SSE endpoint:
+A typical deployment includes an oplogd agent running locally on every node of a cluster serving the API to monitor. The agent serves both roles: 1) ingesting operations coming from the API and 2) streaming aggregated operation of all agents to consumers. The same load balancer use to serve the API can expose the OpLog SSE endpoint:
 
 ![Architecture](doc/archi.png)
 
@@ -50,12 +51,12 @@ Available options:
 * `--listen=":8042"`: The address to listen on. Same address is used for both SSE(HTTP) and UDP APIs.
 * `--max-queued-events=100000`: Number of events to queue before starting throwing up UDP messages.
 * `--mongo-url`: MongoDB URL to connect to.
-* `--object-url`: An URL template to reference objects. If this option is set, SSE events will have an "ref" field with the URL to the object. The URL should contain {{type}} and {{id}} variables (i.e.: http://api.mydomain.com/{{type}}/{{id}})
+* `--object-url`: A URL template to reference objects. If this option is set, SSE events will have an "ref" field with the URL to the object. The URL should contain {{type}} and {{id}} variables (i.e.: http://api.mydomain.com/{{type}}/{{id}})
 * `--password`: Password protecting the global SSE stream.
 
 ## UDP API
 
-To send operations to the agent, an UDP datagram containing a JSON object must be crafted and sent on the agent's UDP port (8042 by default).
+To send operations to the agent, a UDP datagram containing a JSON object must be crafted and sent on the agent's UDP port (8042 by default).
 
 The format of the message is as follow:
 
@@ -81,13 +82,13 @@ See `examples/` directory for implementation examples in different languages.
 
 ## Server Sent Event API
 
-The [SSE](http://dev.w3.org/html5/eventsource/) API runs on the same port as UDP API but using TCP. It means that agents have both input and output roles so it is easy to scale the service by putting an agent on every nodes of the source API cluster and expose their HTTP port via the same load balancer as the API while each nodes can send their updates to the UDP port on their localhost.
+The [SSE](http://dev.w3.org/html5/eventsource/) API runs on the same port as UDP API but using TCP. It means that agents have both input and output roles so it is easy to scale the service by putting an agent on every node of the source API cluster and expose their HTTP port via the same load balancer as the API while each node can send their updates to the UDP port on their localhost.
 
-The W3C SSE protocol is respected by the book. To connect to the API, a GET on `/` with the `Accept: text/event-stream` header is performed. If no `Last-Event-ID` HTTP header is passed, the oplog server will start sending all future operations with no backlog. On each received operation, the client must store the last associated "event id" as operations are treated. This event id will be used to resume the stream where it has been left in the case of a disconnect. The client just has to send the last consumed "event id" using the `Last-Event-ID` HTTP header.
+The W3C SSE protocol is respected by the book. To connect to the API, a GET on `/` with the `Accept: text/event-stream` header is performed. If no `Last-Event-ID` HTTP header is passed, the OpLog server will start sending all future operations with no backlog. On each received operation, the client must store the last associated "event id" as operations are treated. This event id will be used to resume the stream where it has been left in the case of a disconnect. The client just has to send the last consumed "event id" using the `Last-Event-ID` HTTP header.
 
-In return, the client must ensure the `Last-Event-ID` header is sent back in the response. It may happen that the id defined by `Last-Event-ID` is no longer available in the underlaying capped collection. In such case, the agent won't send the backlog as if the `Last-Event-ID` header hadn't been sent. The requested `Last-Event-ID` header won't be sent back in the response either. You may want to perform a full replication when this happen.
+In return, the client must ensure the `Last-Event-ID` header is sent back in the response. It the case that the id defined by `Last-Event-ID` is no longer available in the underlying capped collection, the agent won't send the backlog as if the `Last-Event-ID` header hadn't been sent. The requested `Last-Event-ID` header won't be sent back in the response either. You may want to perform a full replication when this occurs.
 
-The following filters can be passed as query-string:
+The following filters can be passed as a query-string:
 * `types` A list of object types to filter on separated by comas (i.e.: `types=video,user`).
 * `parents` A coma separated list of parents to filter on (i.e.: `parents=video/xk32jd,user/xkjdi`
 
@@ -111,17 +112,17 @@ data: {"timestamp":"2014-11-06T03:04:40.091-08:00","parents":["x3kd2"],"type":"v
 
 ## Full Replication
 
-If required, a full replication with all (not deleted) objects can be performed before streaming live updates. To perform a full replication, pass `0` as value for the `Last-Event-ID` HTTP header. Numeric event ids with 13 digits or less are considered as a replication ids, which represent a milliseconds UNIX timestamp. By passing a millisecond timestamp, you are asking for replicating any objects that have been modified passed this date. Passing `0` thus ensures every objects will be replicated.
+If required, a full replication with all (not deleted) objects can be performed before streaming live updates. To perform a full replication, pass `0` as value for the `Last-Event-ID` HTTP header. Numeric event ids with 13 digits or less are considered replication ids, which represent a milliseconds UNIX timestamp. By passing a millisecond timestamp, you are asking to replicate all objects that have been modified passed this date. Passing `0` thus ensures that every object will be replicated.
 
-If a full replication is interrupted during the transfer, the same mechanism as for live updates is used. Once replication is done, the stream will automatically switch to live events stream so the consumer is ensured not to miss any updates.
+If a full replication is interrupted during the transfer, the same mechanism as for live updates is used. Once replication is complete, the stream will automatically switch to the live events stream so that the consumer does not miss any updates.
 
-When a full replication starts, a special `reset` event with no data is sent to signify the consumer that it should reset its database before applying the subsequent operations.
+When a full replication starts, a special `reset` event with no data is sent to inform the consumer that it should reset its database before applying the subsequent operations.
 
-Once the replication is done and the oplog switch back to the live updates, a special `live` event with no data is sent. This event can be useful for a consumer to know when it is safe for the consumer's service to be activated in production for instance.
+Once the replication is complete and the OpLog switches back to the live updates, a special `live` event with no data is sent. This event can be useful for a consumer to know when it is safe for the consumer's service to be activated in production for instance.
 
 ## Periodical Source Synchronization
 
-There is many ways for the oplog to miss some updates and thus have an incorrect view of the current state of the source data. In order to cope with this issue, a regular synchronization process with the source data content can be performed. The sync is a separate process which compares a dump of the real data with what the oplog have stored in its own database. For any discrepancies **which is anterior** to the dump in the oplog's database, the sync process will generate an appropriate operation in the oplog to fix the delta on both its own database and for all consumers.
+There is many ways for the OpLog to miss some updates and thus have an incorrect view of the current state of the source data. In order to cope with this issue, a regular synchronization process with the source data content can be performed. The sync is a separate process which compares a dump of the real data with what the OpLog has stored within its own database. For any discrepancies **which is anterior** to the dump in the OpLog's database, the sync process will generate an appropriate operation in the OpLog to fix the delta on both its own database and for all consumers.
 
 The dump must be in a streamable JSON format. Each line is a JSON object with the same schema as of the `data` part of the SEE API response.
 Dump example:
@@ -137,9 +138,9 @@ The `timestamp` must represent the last modification date of the object as an RF
 
 The `oplog-sync` command is used with this dump in order to perform the sync. This command will connect to the database, do the comparisons and generate the necessary oplog events to fix the deltas. This command does not need an `oplogd` agent to be running in order to perform its task.
 
-Note that the `oplog-sync` command is the perfect tool to boostrap an oplog with an existing API.
+Note that the `oplog-sync` command is the perfect tool to boostrap an OpLog with an existing API.
 
-BE CAREFUL, any object absent of the dump having a timestamp lower than the most recent timestamp present in the dump will be deleted from the oplog.
+BE CAREFUL, any object absent of the dump having a timestamp lower than the most recent timestamp present in the dump will be deleted from the OpLog.
 
 ## Status Endpoint
 
@@ -175,9 +176,9 @@ Date: Thu, 06 Nov 2014 10:40:25 GMT
 
 ## Consumer
 
-To write a consumer you may use any SSE library and consume the API by yourself. If your consumer is written in Go, a dedicated consumer library is available (see [github.com/dailymotion/oplog/consumer](http://godoc.org/github.com/dailymotion/oplog/consumer)).
+To write a consumer you may use any SSE library and consume the API yourself. If your consumer is written in Go, a dedicated consumer library is available (see [github.com/dailymotion/oplog/consumer](http://godoc.org/github.com/dailymotion/oplog/consumer)).
 
-Here is an example of Go consumer using the provided consumer library:
+Here is an example of a Go consumer using the provided consumer library:
 
 ```go
 import (
@@ -230,7 +231,7 @@ func main() {
 }
 ```
 
-The ack mechanism allows you to handle operation in parallel without loosing track of which operation has been handled in case of a connection failure recovery.
+In case of a connection failure recovery the ack mechanism allows you to handle operations in parallel without loosing track of which operation has been handled.
 
 See `cmd/oplog-tail/` for another usage example.
 
