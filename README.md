@@ -1,4 +1,4 @@
-# REST Operation Log
+# REST Operation Log [![godoc](http://img.shields.io/badge/godoc-reference-blue.svg?style=flat)](https://godoc.org/github.com/dailymotion/oplog) [![license](http://img.shields.io/badge/license-MIT-red.svg?style=flat)](https://raw.githubusercontent.com/dailymotion/oplog/master/LICENSE) [![build](https://img.shields.io/travis/dailymotion/oplog.svg?style=flat)](https://travis-ci.org/dailymotion/oplog)
 
 OpLog is used as a real-time data synchronization layer between a producer (generally a REST API) and consumers. Basically, it's a generic database replication system for web APIs or an easy way to add a public streaming capability to an existing API.
 
