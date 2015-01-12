@@ -430,8 +430,12 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 					// We use the last event id here in order to ensure the consumer will resume
 					// the replication starting at this point in time in case of a failure after
 					// the "live" event.
+					liveId := "" // default value
+					if lastEv != nil {
+						liveId = lastEv.GetEventId()
+					}
 					out <- &OpLogEvent{
-						Id:    lastEv.GetEventId(),
+						Id:    liveId,
 						Event: "live",
 					}
 					// Switch to live update at the last operation id inserted before the replication
