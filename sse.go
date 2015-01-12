@@ -124,9 +124,10 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	notifier := w.(http.CloseNotifier)
 	ops := make(chan io.WriterTo)
 	err := make(chan error)
+	stop := make(chan bool)
 	flusher.Flush()
 
-	go daemon.ol.Tail(lastId, filter, ops, err)
+	go daemon.ol.Tail(lastId, filter, ops, err, stop)
 	daemon.ol.Stats.Clients.Incr()
 
 	for {
@@ -134,6 +135,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 		case <-notifier.CloseNotify():
 			log.Info("SSE connection closed")
 			daemon.ol.Stats.Clients.Decr()
+			stop <- true
 			return
 		case err := <-err:
 			log.Warnf("SSE oplog error %s", err)
