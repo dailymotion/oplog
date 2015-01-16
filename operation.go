@@ -43,7 +43,7 @@ func (op Operation) GetEventId() string {
 
 func (op Operation) Validate() error {
 	switch op.Event {
-	case "create", "update", "delete":
+	case "insert", "update", "delete":
 	default:
 		return fmt.Errorf("invalid event name: %s", op.Event)
 	}

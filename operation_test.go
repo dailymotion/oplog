@@ -6,7 +6,7 @@ import "testing"
 
 func TestOperationValidate(t *testing.T) {
 	op := Operation{
-		Event: "create",
+		Event: "insert",
 		Data: &OperationData{
 			Id:   "id",
 			Type: "type",

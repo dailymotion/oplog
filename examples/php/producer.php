@@ -1,6 +1,6 @@
 <?php
 $operation = array( 
-    "event" => "create",
+    "event" => "insert",
     "parents" => array(
         "user/1234"
     ),

@@ -167,9 +167,9 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 	// Apply the operation on the state collection
 	event := op.Event
 	if event == "update" {
-		// Only store create and delete events in the object stats collection as
+		// Only store insert and delete events in the object stats collection as
 		// only the final stat of the object is stored.
-		event = "create"
+		event = "insert"
 	}
 	o := ObjectState{
 		Id:    op.Data.GetId(),
