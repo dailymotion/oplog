@@ -104,6 +104,7 @@ func main() {
 
 	// Generate events to fix the delta
 	db := ol.DB()
+	defer db.Session.Close()
 	op := &oplog.Operation{Event: "create"}
 	genEvents := func(opMap oplog.OperationDataMap) {
 		for _, obd := range opMap {

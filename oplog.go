@@ -139,6 +139,7 @@ func (oplog *OpLog) init(maxBytes int) {
 // Ingest appends an operation into the OpLog thru a channel
 func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 	db := oplog.DB()
+	defer db.Session.Close()
 	for {
 		select {
 		case op := <-ops:
@@ -155,6 +156,7 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 	if db == nil {
 		db = oplog.DB()
+		defer db.Session.Close()
 	}
 	log.Debugf("OPLOG ingest operation: %#v", op.Info())
 	for {
@@ -370,8 +372,8 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 
 	wg := sync.WaitGroup{}
 
+	wg.Add(1)
 	go func() {
-		wg.Add(1)
 		defer wg.Done()
 
 		db := oplog.DB()
