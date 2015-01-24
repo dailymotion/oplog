@@ -3,6 +3,7 @@ package oplog
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -93,6 +94,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h := w.Header()
+	h.Set("Server", fmt.Sprintf("oplog/%s", VERSION))
 	h.Set("Content-Type", "text/event-stream; charset=utf-8")
 	h.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	h.Set("Connection", "keep-alive")
