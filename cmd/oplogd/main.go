@@ -30,10 +30,10 @@ func main() {
 	}
 
 	ol, err := oplog.New(*mongoURL, *cappedCollectionSize)
-	ol.ObjectURL = *objectURL
 	if err != nil {
 		log.Fatal(err)
 	}
+	ol.ObjectURL = *objectURL
 
 	log.Infof("Listening on %s (UDP/TCP)", *listenAddr)
 

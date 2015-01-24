@@ -98,13 +98,24 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	h.Set("Access-Control-Allow-Origin", "*")
 
 	lastId := r.Header.Get("Last-Event-ID")
-	if daemon.ol.HasId(lastId) {
+	found, err := daemon.ol.HasId(lastId)
+	if err != nil {
+		log.Warnf("SSE can't check last id: %s", err)
+		w.WriteHeader(503)
+		return
+	}
+	if found {
 		h.Set("Last-Event-ID", lastId)
 	} else {
 		// If requested id doesn't exists, start the stream from the very last
 		// operation in the oplog and do not return the Last-Event-ID header
 		// to indicate we didn't obey the request
-		lastId = daemon.ol.LastId()
+		lastId, err = daemon.ol.LastId()
+		if err != nil {
+			log.Warnf("SSE can't get last id: %s", err)
+			w.WriteHeader(503)
+			return
+		}
 	}
 
 	types := []string{}
@@ -123,11 +134,10 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	flusher := w.(http.Flusher)
 	notifier := w.(http.CloseNotifier)
 	ops := make(chan io.WriterTo)
-	err := make(chan error)
 	stop := make(chan bool)
 	flusher.Flush()
 
-	go daemon.ol.Tail(lastId, filter, ops, err, stop)
+	go daemon.ol.Tail(lastId, filter, ops, stop)
 	daemon.ol.Stats.Clients.Incr()
 
 	for {
@@ -136,9 +146,6 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 			log.Info("SSE connection closed")
 			daemon.ol.Stats.Clients.Decr()
 			stop <- true
-			return
-		case err := <-err:
-			log.Warnf("SSE oplog error %s", err)
 			return
 		case op := <-ops:
 			log.Debug("SSE sending event")

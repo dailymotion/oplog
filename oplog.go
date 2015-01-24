@@ -87,6 +87,8 @@ func New(mongoURL string, maxBytes int) (*OpLog, error) {
 	if err != nil {
 		return nil, err
 	}
+	session.SetSyncTimeout(10 * time.Second)
+	session.SetSocketTimeout(10 * time.Second)
 	stats := NewStats()
 	oplog := &OpLog{
 		s:     session,
@@ -255,42 +257,46 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, updateMap OperationDataMap,
 }
 
 // HasId checks if an operation id is present in the capped collection.
-func (oplog *OpLog) HasId(id string) bool {
+func (oplog *OpLog) HasId(id string) (bool, error) {
+	if id == "" {
+		return false, nil
+	}
+
 	_, ok := parseTimestampId(id)
 	if ok {
 		// Id is a timestamp, timestamp are always valid
-		return true
+		return true, nil
 	}
 
 	oid := parseObjectId(id)
 	if oid == nil {
-		return false
+		return false, nil
 	}
 
 	db := oplog.DB()
 	defer db.Session.Close()
 	count, err := db.C("oplog").FindId(oid).Count()
-	if err != nil {
-		return false
-	}
-	return count != 0
+	return count != 0, err
 }
 
 // LastId returns the most recently inserted operation id if any or "" if oplog is empty
-func (oplog *OpLog) LastId() string {
+func (oplog *OpLog) LastId() (string, error) {
 	db := oplog.DB()
 	defer db.Session.Close()
 	operation := &Operation{}
 	err := db.C("oplog").Find(nil).Sort("-$natural").One(operation)
-	if err != mgo.ErrNotFound && operation.Id != nil {
-		return operation.Id.Hex()
+	if err == mgo.ErrNotFound {
+		return "", nil
 	}
-	return ""
+	if operation.Id != nil {
+		return operation.Id.Hex(), nil
+	}
+	return "", err
 }
 
 // iter creates either an iterator on the objects collection if the lastId is a timestamp
 // or tailable cursor on the oplog capped collection otherwise
-func (oplog *OpLog) iter(db *mgo.Database, lastId string, filter OpLogFilter) (iter *mgo.Iter, streaming bool) {
+func (oplog *OpLog) iter(db *mgo.Database, lastId string, filter OpLogFilter) (iter *mgo.Iter, err error, streaming bool) {
 	query := bson.M{}
 	if len(filter.Types) > 0 {
 		query["data.t"] = bson.M{"$in": filter.Types}
@@ -311,7 +317,11 @@ func (oplog *OpLog) iter(db *mgo.Database, lastId string, filter OpLogFilter) (i
 		oid := parseObjectId(lastId)
 		if oid == nil {
 			// If no last id provided, find the last operation id in the colleciton
-			oid = parseObjectId(oplog.LastId())
+			lastId, err = oplog.LastId()
+			if err != nil {
+				return
+			}
+			oid = parseObjectId(lastId)
 		}
 		if oid != nil {
 			query["_id"] = bson.M{"$gt": oid}
@@ -333,9 +343,8 @@ func (oplog *OpLog) iter(db *mgo.Database, lastId string, filter OpLogFilter) (i
 //
 // The filter argument can be used to filter on some type of objects or objects with given parrents.
 //
-// The create, update, delete events are streamed back to the sender thru the out channel with error
-// sent thru the err channel.
-func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.WriterTo, err chan<- error, stop <-chan bool) {
+// The create, update, delete events are streamed back to the sender thru the out channel
+func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.WriterTo, stop <-chan bool) {
 	var lastEv GenericEvent
 
 	if lastId == "0" {
@@ -367,9 +376,11 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 		defer db.Session.Close()
 
 		for {
-			iter, streaming := oplog.iter(db, lastId, filter)
+			iter, err, streaming := oplog.iter(db, lastId, filter)
 
-			if streaming {
+			if err != nil {
+				log.Warnf("OPLOG tail failed with error, try to reconnect: %s", err)
+			} else if streaming {
 				log.Debug("OPLOG start live updates")
 
 				operation := Operation{}
@@ -402,26 +413,28 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 				log.Debug("OPLOG start replication")
 				// Capture the current oplog position in order to resume at this position
 				// once initial replication is done
-				replicationFallbackId := oplog.LastId()
+				replicationFallbackId, err := oplog.LastId()
 
-				object := ObjectState{}
-				for iter.Next(&object) {
-					if isDone() {
-						iter.Close()
-						break
+				if err == nil {
+					object := ObjectState{}
+					for iter.Next(&object) {
+						if isDone() {
+							iter.Close()
+							break
+						}
+						if oplog.ObjectURL != "" {
+							object.Data.genRef(oplog.ObjectURL)
+						}
+						out <- object
+						lastEv = object
 					}
-					if oplog.ObjectURL != "" {
-						object.Data.genRef(oplog.ObjectURL)
-					}
-					out <- object
-					lastEv = object
 				}
 
 				if isDone() {
 					break
 				}
 
-				if iter.Err() != nil {
+				if err != nil || iter.Err() != nil {
 					log.Warnf("OPLOG replication failed with error, try to reconnect: %s", iter.Err())
 				} else {
 					// Replication is done, notify and swtich to live event stream
