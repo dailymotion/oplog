@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	log "github.com/Sirupsen/logrus"
 )
@@ -154,6 +155,12 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 				log.Warnf("SSE write error %s", err)
 				continue
 			}
+			flusher.Flush()
+		case <-time.After(25 * time.Second):
+			// Send "ping" data to prevent proxy/browsers from closing the connection
+			// for inactivity
+			log.Debug("SSE sending a keep alive ping")
+			w.Write([]byte{':', '\n'})
 			flusher.Flush()
 		}
 	}
