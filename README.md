@@ -32,9 +32,9 @@ Another deployment choice may be to separate the SSE API from the operations ing
 To install the project, execute the following commands:
 
     go get -u github.com/dailymotion/oplog
-    go build -o /usr/local/bin/oplogd github.com/dailymotion/oplog/cmd/oplogd
-    go build -o /usr/local/bin/oplog-sync github.com/dailymotion/oplog/cmd/oplog-sync
-    go build -o /usr/local/bin/oplog-tail github.com/dailymotion/oplog/cmd/oplog-tail
+    go build -a -o /usr/local/bin/oplogd github.com/dailymotion/oplog/cmd/oplogd
+    go build -a -o /usr/local/bin/oplog-sync github.com/dailymotion/oplog/cmd/oplog-sync
+    go build -a -o /usr/local/bin/oplog-tail github.com/dailymotion/oplog/cmd/oplog-tail
 
 ## Starting the agent
 
