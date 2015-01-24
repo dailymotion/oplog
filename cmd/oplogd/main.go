@@ -36,6 +36,8 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 	}
 
+	log.Infof("Starting oplog %s", oplog.VERSION)
+
 	ol, err := oplog.New(*mongoURL, *cappedCollectionSize)
 	if err != nil {
 		log.Fatal(err)
