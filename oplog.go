@@ -143,7 +143,7 @@ func (oplog *OpLog) Ingest(ops <-chan *Operation) {
 	for {
 		select {
 		case op := <-ops:
-			oplog.Stats.QueueSize.Set(len(ops))
+			oplog.Stats.QueueSize.Set(int64(len(ops)))
 			oplog.Append(op, db)
 		}
 	}
@@ -193,7 +193,7 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 		}
 		break
 	}
-	oplog.Stats.EventsIngested.Incr()
+	oplog.Stats.EventsIngested.Add(1)
 }
 
 // Diff finds which objects must be created or deleted in order to fix the delta

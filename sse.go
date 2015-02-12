@@ -2,7 +2,7 @@ package oplog
 
 import (
 	"encoding/base64"
-	"encoding/json"
+	"expvar"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,13 +70,12 @@ func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (daemon *SSEDaemon) Status(w http.ResponseWriter, r *http.Request) {
-	status, err := json.Marshal(daemon.ol.Stats)
-	if err != nil {
-		w.WriteHeader(500)
-		return
-	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(status)
+	fmt.Fprintf(w, "{\"status\":\"OK\"")
+	expvar.Do(func(kv expvar.KeyValue) {
+		fmt.Fprintf(w, ",%q:%s", kv.Key, kv.Value)
+	})
+	fmt.Fprintf(w, "}")
 }
 
 func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
@@ -141,13 +140,13 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	go daemon.ol.Tail(lastId, filter, ops, stop)
-	daemon.ol.Stats.Clients.Incr()
+	daemon.ol.Stats.Clients.Add(1)
 
 	for {
 		select {
 		case <-notifier.CloseNotify():
 			log.Info("SSE connection closed")
-			daemon.ol.Stats.Clients.Decr()
+			daemon.ol.Stats.Clients.Add(-1)
 			stop <- true
 			return
 		case op := <-ops:

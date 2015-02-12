@@ -43,7 +43,7 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 		return err
 	}
 
-	daemon.ol.Stats.QueueMaxSize.Set(queueMaxSize)
+	daemon.ol.Stats.QueueMaxSize.Set(int64(queueMaxSize))
 	ops := make(chan *Operation, queueMaxSize)
 	go daemon.ol.Ingest(ops)
 
@@ -59,10 +59,10 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 		log.Debugf("UDP received operation from UDP: %s", buffer[:n])
 
 		queueSize := len(ops)
-		daemon.ol.Stats.QueueSize.Set(queueSize)
+		daemon.ol.Stats.QueueSize.Set(int64(queueSize))
 		if queueSize >= queueMaxSize {
 			log.Warnf("UDP input queue is full, thowing message: %s", buffer[:n])
-			daemon.ol.Stats.EventsDiscarded.Incr()
+			daemon.ol.Stats.EventsDiscarded.Add(1)
 			continue
 		}
 
@@ -70,7 +70,7 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 		err = json.Unmarshal(buffer[:n], &operation)
 		if err != nil {
 			log.Warnf("UDP invalid JSON recieved: %s", err)
-			daemon.ol.Stats.EventsError.Incr()
+			daemon.ol.Stats.EventsError.Add(1)
 			continue
 		}
 
@@ -93,11 +93,11 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 		}
 		if err := op.Validate(); err != nil {
 			log.Warnf("UDP invalid operation: %s", err)
-			daemon.ol.Stats.EventsError.Incr()
+			daemon.ol.Stats.EventsError.Add(1)
 			continue
 		}
 
-		daemon.ol.Stats.EventsReceived.Incr()
+		daemon.ol.Stats.EventsReceived.Add(1)
 		ops <- &op
 	}
 }
