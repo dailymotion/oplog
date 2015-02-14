@@ -88,7 +88,7 @@ func New(mongoURL string, maxBytes int) (*OpLog, error) {
 		return nil, err
 	}
 	session.SetSyncTimeout(10 * time.Second)
-	session.SetSocketTimeout(10 * time.Second)
+	session.SetSocketTimeout(20 * time.Second)
 	session.SetMode(mgo.Monotonic, true)
 	session.SetSafe(&mgo.Safe{})
 	stats := NewStats()
