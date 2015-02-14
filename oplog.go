@@ -310,10 +310,22 @@ func (oplog *OpLog) LastId() (string, error) {
 // or tailable cursor on the oplog capped collection otherwise
 func (oplog *OpLog) iter(db *mgo.Database, lastId string, filter OpLogFilter) (iter *mgo.Iter, err error, streaming bool) {
 	query := bson.M{}
-	if len(filter.Types) > 0 {
+
+	switch len(filter.Types) {
+	case 0:
+		// Do nothing
+	case 1:
+		query["data.t"] = filter.Types[0]
+	default: // > 1
 		query["data.t"] = bson.M{"$in": filter.Types}
 	}
-	if len(filter.Parents) > 0 {
+
+	switch len(filter.Parents) {
+	case 0:
+		// Do nothing
+	case 1:
+		query["data.p"] = filter.Parents[0]
+	default: // > 1
 		query["data.p"] = bson.M{"$in": filter.Parents}
 	}
 
