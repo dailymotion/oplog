@@ -164,8 +164,7 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 			log.Warnf("OPLOG can't insert operation, try to reconnect: %s", err)
 			// Try to reconnect
 			time.Sleep(time.Second)
-			db.Session.Close()
-			db = oplog.DB()
+			db.Session.Refresh()
 			continue
 		}
 		break
@@ -187,8 +186,7 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 			log.Warnf("OPLOG can't upsert object, try to reconnect: %s", err)
 			// Try to reconnect
 			time.Sleep(time.Second)
-			db.Session.Close()
-			db = oplog.DB()
+			db.Session.Refresh()
 			continue
 		}
 		break
@@ -217,7 +215,6 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, updateMap OperationDataMap,
 	}
 
 	obs := ObjectState{}
-	defer db.Session.Close()
 	iter := db.C("objects").Find(bson.M{"event": bson.M{"$ne": "delete"}}).Iter()
 	for iter.Next(&obs) {
 		if opd, ok := createMap[obs.Id]; ok {
@@ -462,10 +459,9 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 				}
 			}
 
-			// Prepare for reconnect
+			// Prepare for retry
 			iter.Close()
-			db.Session.Close()
-			db = oplog.DB()
+			db.Session.Refresh()
 			if lastEv != nil {
 				lastId = lastEv.GetEventId()
 			}
