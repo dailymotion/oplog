@@ -13,6 +13,7 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/cenkalti/backoff"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 )
@@ -165,11 +166,14 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 		defer db.Session.Close()
 	}
 	log.Debugf("OPLOG ingest operation: %#v", op.Info())
+	b := backoff.NewExponentialBackOff()
+	b.MaxElapsedTime = 0 // Retry forever
+	b.Reset()
 	for {
 		if err := db.C("oplog").Insert(op); err != nil {
-			log.Warnf("OPLOG can't insert operation, try to reconnect: %s", err)
-			// Try to reconnect
-			time.Sleep(time.Second)
+			log.Warnf("OPLOG can't insert operation, retrying: %s", err)
+			// Retry with backoff
+			time.Sleep(b.NextBackOff())
 			db.Session.Refresh()
 			continue
 		}
@@ -187,11 +191,12 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 		Event: event,
 		Data:  op.Data,
 	}
+	b.Reset()
 	for {
 		if _, err := db.C("objects").Upsert(bson.M{"_id": o.Id}, o); err != nil {
-			log.Warnf("OPLOG can't upsert object, try to reconnect: %s", err)
-			// Try to reconnect
-			time.Sleep(time.Second)
+			log.Warnf("OPLOG can't upsert object, retrying: %s", err)
+			// Retry with backoff
+			time.Sleep(b.NextBackOff())
 			db.Session.Refresh()
 			continue
 		}
@@ -382,6 +387,10 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 		db := oplog.DB()
 		defer db.Session.Close()
 
+		b := backoff.NewExponentialBackOff()
+		b.MaxElapsedTime = 0 // Retry forever
+		b.Reset()
+
 		for {
 			iter, err, streaming := oplog.iter(db, lastId, filter)
 
@@ -389,6 +398,7 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 				log.Warnf("OPLOG tail failed with error, try to reconnect: %s", err)
 			} else if streaming {
 				log.Debug("OPLOG start live updates")
+				b.Reset()
 
 				operation := Operation{}
 				for {
@@ -418,6 +428,7 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 				}
 			} else {
 				log.Debug("OPLOG start replication")
+				b.Reset()
 				// Capture the current oplog position in order to resume at this position
 				// once initial replication is done
 				replicationFallbackId, err := oplog.LastId()
@@ -442,7 +453,7 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 				}
 
 				if err != nil || iter.Err() != nil {
-					log.Warnf("OPLOG replication failed with error, try to reconnect: %s", iter.Err())
+					log.Warnf("OPLOG replication failed with error, retrying: %s", iter.Err())
 				} else {
 					// Replication is done, notify and swtich to live event stream
 					//
@@ -465,13 +476,13 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 				}
 			}
 
-			// Prepare for retry
+			// Prepare for retry with backoff
 			iter.Close()
+			time.Sleep(b.NextBackOff())
 			db.Session.Refresh()
 			if lastEv != nil {
 				lastId = lastEv.GetEventId()
 			}
-			time.Sleep(time.Second)
 		}
 	}()
 
