@@ -130,7 +130,13 @@ func (oplog *OpLog) init(maxBytes int) {
 	}
 	if !objectsExists {
 		log.Info("OPLOG creating objects index")
-		if err := oplog.s.DB("").C("objects").EnsureIndexKey("event", "data.ts"); err != nil {
+		c := oplog.s.DB("").C("objects")
+		// Replication query
+		if err := c.EnsureIndexKey("event", "data.ts"); err != nil {
+			log.Fatal(err)
+		}
+		// Replication query with a filter on types
+		if err := c.EnsureIndexKey("event", "data.t", "data.ts"); err != nil {
 			log.Fatal(err)
 		}
 	}
