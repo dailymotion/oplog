@@ -226,43 +226,39 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, updateMap OperationDataMap,
 	}
 
 	obs := ObjectState{}
-	iter := db.C("objects").Find(bson.M{"event": bson.M{"$ne": "delete"}}).Iter()
+	iter := db.C("objects").Find(bson.M{}).Iter()
 	for iter.Next(&obs) {
-		if opd, ok := createMap[obs.Id]; ok {
-			// Object exists on both sides, remove it from the create map
-			delete(createMap, obs.Id)
-			// If the dump object is newer than oplog's, add it to the update map
-			if obs.Data.Timestamp.Before(opd.Timestamp) {
-				updateMap[obs.Id] = opd
+		if obs.Event == "deleted" {
+			if obd, ok := createMap[obs.Id]; ok {
+				// If the object is present in the dump but deleted in the oplog, it means
+				// that it has been deleted between the dump creation and the sync
+				// (if the oplog version is more recent)
+				if obd.Timestamp.Before(obs.Data.Timestamp) {
+					delete(createMap, obs.Id)
+				}
 			}
 		} else {
-			// The object only exists in the oplog db, add it to the delete map
-			// if the timestamp of the found object is older than oldest object
-			// in the dump in order to ensure we don't delete an object which
-			// have been created between the dump creation and the sync.
-			if obs.Data.Timestamp.Before(dumpTime) {
-				deleteMap[obs.Id] = *obs.Data
+			if obd, ok := createMap[obs.Id]; ok {
+				// Object exists on both sides, remove it from the create map
 				delete(createMap, obs.Id)
+				// If the dump object is newer than oplog's, add it to the update map
+				if obs.Data.Timestamp.Before(obd.Timestamp) {
+					updateMap[obs.Id] = obd
+				}
+			} else {
+				// The object only exists in the oplog db, add it to the delete map
+				// if the timestamp of the found object is older than oldest object
+				// in the dump in order to ensure we don't delete an object which
+				// have been created between the dump creation and the sync.
+				if obs.Data.Timestamp.Before(dumpTime) {
+					deleteMap[obs.Id] = *obs.Data
+					delete(createMap, obs.Id)
+				}
 			}
 		}
 	}
 	if iter.Err() != nil {
 		return iter.Err()
-	}
-
-	// For all object present in the dump but not in the oplog, ensure objects
-	// haven't been deleted between the dump creation and the sync
-	for id, obd := range createMap {
-		err := db.C("objects").FindId(id).One(&obs)
-		if err == mgo.ErrNotFound {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if obd.Timestamp.Before(obs.Data.Timestamp) {
-			delete(createMap, obs.Id)
-		}
 	}
 
 	return nil
