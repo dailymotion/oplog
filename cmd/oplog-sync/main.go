@@ -24,11 +24,9 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 
 	log "github.com/Sirupsen/logrus"
@@ -37,6 +35,7 @@ import (
 
 var (
 	debug                = flag.Bool("debug", false, "Show debug log messages.")
+	dryRun               = flag.Bool("dry-run", false, "Compute diff but do not generate events.")
 	mongoURL             = flag.String("mongo-url", "", "MongoDB URL to connect to.")
 	cappedCollectionSize = flag.Int("capped-collection-size", 104857600, "Size of the created MongoDB capped collection size in bytes (default 100MB).")
 	maxQueuedEvents      = flag.Uint64("max-queued-events", 100000, "Number of events to queue before starting throwing UDP messages.")
@@ -64,20 +63,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fh, err := os.Open(file)
-	if err != nil {
-		log.Fatalf("SYNC cannot open dump file: %s", err)
-	}
-	defer fh.Close()
-
-	lines, err := lineCounter(fh)
-	if err != nil {
-		log.Fatalf("SYNC error counting lines: %s", err)
-	}
-	fh.Seek(0, 0)
-	createMap := make(oplog.OperationDataMap, lines)
+	createMap := make(oplog.OperationDataMap)
 	updateMap := make(oplog.OperationDataMap)
 	deleteMap := make(oplog.OperationDataMap)
+
+	var fh *os.File
+	if file == "-" {
+		fh = os.Stdin
+	} else {
+		fh, err = os.Open(file)
+		if err != nil {
+			log.Fatalf("SYNC cannot open dump file: %s", err)
+		}
+		defer fh.Close()
+	}
 
 	// Load dump in memory
 	obd := oplog.OperationData{}
@@ -102,6 +101,12 @@ func main() {
 		log.Fatalf("SYNC diff error: %s", err)
 	}
 
+	log.Infof("SYNC create: %d, update: %d, delete: %d", len(createMap), len(updateMap), len(deleteMap))
+
+	if *dryRun {
+		return
+	}
+
 	// Generate events to fix the delta
 	db := ol.DB()
 	defer db.Session.Close()
@@ -112,30 +117,12 @@ func main() {
 			ol.Append(op, db)
 		}
 	}
+	log.Debugf("SYNC generating %d create events", len(createMap))
 	genEvents(createMap)
+	log.Debugf("SYNC generating %d update events", len(updateMap))
 	op.Event = "update"
 	genEvents(updateMap)
+	log.Debugf("SYNC generating %d delete events", len(deleteMap))
 	op.Event = "delete"
 	genEvents(deleteMap)
-}
-
-func lineCounter(r io.Reader) (int, error) {
-	buf := make([]byte, 8196)
-	count := 0
-	lineSep := []byte{'\n'}
-
-	for {
-		c, err := r.Read(buf)
-		if err != nil && err != io.EOF {
-			return count, err
-		}
-
-		count += bytes.Count(buf[:c], lineSep)
-
-		if err == io.EOF {
-			break
-		}
-	}
-
-	return count, nil
 }
