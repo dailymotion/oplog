@@ -147,12 +147,14 @@ BE CAREFUL, any object absent of the dump having a timestamp lower than the most
 The agent exposes a `/status` endpoint over HTTP to show some statistics about itself. A JSON object is returned with the following fields:
 
 * `events_received`: Total number of events received on the UDP interface
+* `events_sent`: Total number of events sent thru the SSE interface
 * `events_ingested`: Total number of events ingested into MongoDB with success
 * `events_error`: Total number of events received on the UDP interface with an invalid format
 * `events_discarded`: Total number of events discarded because the queue was full
 * `queue_size`: Current number of events in the ingestion queue
 * `queue_max_size`:  Maximum number of events allowed in the ingestion queue before discarding events
 * `clients`: Number of clients connected to the SSE API
+* `connections`: Total number of connections established on the SSE API
 
 ```javascript
 GET /status
@@ -164,10 +166,12 @@ Date: Thu, 06 Nov 2014 10:40:25 GMT
 
 {
     "clients": 0,
+    "connections": 0,
     "events_discarded": 0,
     "events_error": 0,
     "events_ingested": 0,
     "events_received": 0,
+    "events_sent": 0,
     "queue_max_size": 100000,
     "queue_size": 0,
     "status": "OK"

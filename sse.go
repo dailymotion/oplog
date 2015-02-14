@@ -141,6 +141,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 
 	go daemon.ol.Tail(lastId, filter, ops, stop)
 	daemon.ol.Stats.Clients.Add(1)
+	daemon.ol.Stats.Connections.Add(1)
 
 	for {
 		select {
@@ -151,6 +152,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 			return
 		case op := <-ops:
 			log.Debug("SSE sending event")
+			daemon.ol.Stats.EventsSent.Add(1)
 			_, err := op.WriteTo(w)
 			if err != nil {
 				log.Warnf("SSE write error %s", err)
