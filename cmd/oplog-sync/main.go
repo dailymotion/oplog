@@ -78,7 +78,7 @@ func main() {
 		defer fh.Close()
 	}
 
-	// Load dump in memory
+	log.Debugf("SYNC loading dump")
 	obd := oplog.OperationData{}
 	scanner := bufio.NewScanner(fh)
 	line := 0
@@ -96,18 +96,26 @@ func main() {
 		log.Fatalf("SYNC dump reading error: %s", err)
 	}
 
+	total := len(createMap)
+
 	// Scan the oplog db and generate the diff
+	log.Debugf("SYNC generating the diff")
 	if err := ol.Diff(createMap, updateMap, deleteMap); err != nil {
 		log.Fatalf("SYNC diff error: %s", err)
 	}
 
-	log.Infof("SYNC create: %d, update: %d, delete: %d", len(createMap), len(updateMap), len(deleteMap))
+	totalCreate := len(createMap)
+	totalUpdate := len(updateMap)
+	totalDelete := len(deleteMap)
+	log.Infof("SYNC create: %d, update: %d, delete: %d, untouched: %d",
+		totalCreate, totalUpdate, totalDelete, total-totalCreate-totalDelete-totalDelete)
 
 	if *dryRun {
 		return
 	}
 
 	// Generate events to fix the delta
+	log.Debugf("SYNC sending the delta events")
 	db := ol.DB()
 	defer db.Session.Close()
 	op := &oplog.Operation{Event: "create"}
@@ -117,12 +125,14 @@ func main() {
 			ol.Append(op, db)
 		}
 	}
-	log.Debugf("SYNC generating %d create events", len(createMap))
+	log.Debugf("SYNC generating %d create events", totalCreate)
 	genEvents(createMap)
-	log.Debugf("SYNC generating %d update events", len(updateMap))
+	log.Debugf("SYNC generating %d update events", totalUpdate)
 	op.Event = "update"
 	genEvents(updateMap)
-	log.Debugf("SYNC generating %d delete events", len(deleteMap))
+	log.Debugf("SYNC generating %d delete events", totalDelete)
 	op.Event = "delete"
 	genEvents(deleteMap)
+
+	log.Debugf("SYNC done")
 }
