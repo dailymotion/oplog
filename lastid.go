@@ -18,6 +18,7 @@ type OperationLastId struct {
 
 type ReplicationLastId struct {
 	int64
+	fallbackMode bool
 }
 
 // parseObjectId returns a bson.ObjectId from an hex representation of an object id or nil
@@ -47,7 +48,7 @@ func parseTimestampId(id string) (ts int64, ok bool) {
 func NewLastId(id string) (LastId, error) {
 	if ts, ok := parseTimestampId(id); ok {
 		// Id is a timestamp, timestamp are always valid
-		return &ReplicationLastId{ts}, nil
+		return &ReplicationLastId{ts, false}, nil
 	}
 
 	oid := parseObjectId(id)
@@ -69,5 +70,5 @@ func (oid OperationLastId) String() string {
 // the timestamp part of the Mongo ObjectId. If the id is not a valid ObjectId,
 // an error is returned.
 func (oid *OperationLastId) Fallback() LastId {
-	return &ReplicationLastId{oid.Time().UnixNano() / 1000000}
+	return &ReplicationLastId{oid.Time().UnixNano() / 1000000, true}
 }

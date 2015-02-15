@@ -88,6 +88,14 @@ func (oplog *OpLog) init(maxBytes int) {
 		if err := c.EnsureIndexKey("event", "data.t", "ts"); err != nil {
 			log.Fatal(err)
 		}
+		// Fallback query
+		if err := c.EnsureIndexKey("ts"); err != nil {
+			log.Fatal(err)
+		}
+		// Fallback query with a filter on types
+		if err := c.EnsureIndexKey("data.t", "ts"); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 
@@ -241,8 +249,8 @@ func (oplog *OpLog) LastId() (LastId, error) {
 	return nil, err
 }
 
-// iter creates either an iterator on the objects collection if the lastId is a timestamp
-// or tailable cursor on the oplog capped collection otherwise
+// iter creates either an iterator on the states collection if the lastId is a timestamp
+// or a tailable cursor on the events capped collection otherwise
 func (oplog *OpLog) iter(db *mgo.Database, lastId LastId, filter OpLogFilter) (iter *mgo.Iter, err error, streaming bool) {
 	query := bson.M{}
 	filter.apply(&query)
@@ -252,7 +260,12 @@ func (oplog *OpLog) iter(db *mgo.Database, lastId LastId, filter OpLogFilter) (i
 			// Id is a timestamp, timestamp are always valid
 			query["ts"] = bson.M{"$gte": time.Unix(0, r.int64*1000000)}
 		}
-		query["event"] = bson.M{"$ne": "delete"}
+		if !r.fallbackMode {
+			// In replication mode, do only notify about inserts
+			// In fallback mode (when operation id is no longer in the capped collection),
+			// we must not filter deletes otherwise the consumer will get out of sync
+			query["event"] = bson.M{"$ne": "delete"}
+		}
 		iter = db.C("oplog_states").Find(query).Sort("ts").Iter()
 		streaming = false
 	} else {

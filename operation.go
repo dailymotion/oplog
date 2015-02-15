@@ -71,7 +71,7 @@ func (op *Operation) Info() string {
 
 // GetEventId returns an SSE last event id for the object state
 func (obj ObjectState) GetEventId() LastId {
-	return &ReplicationLastId{obj.Timestamp.UnixNano() / 1000000}
+	return &ReplicationLastId{obj.Timestamp.UnixNano() / 1000000, false}
 }
 
 // WriteTo serializes an ObjectState as a SSE compatible message
