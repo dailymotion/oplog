@@ -37,7 +37,6 @@ func New(mongoURL string, maxBytes int) (*OpLog, error) {
 	}
 	session.SetSyncTimeout(10 * time.Second)
 	session.SetSocketTimeout(20 * time.Second)
-	session.SetMode(mgo.Monotonic, true)
 	session.SetSafe(&mgo.Safe{})
 	stats := NewStats()
 	oplog := &OpLog{
@@ -45,6 +44,8 @@ func New(mongoURL string, maxBytes int) (*OpLog, error) {
 		Stats: &stats,
 	}
 	oplog.init(maxBytes)
+	// Setting monotonic before collection fails with a "not master" error
+	session.SetMode(mgo.Monotonic, true)
 	return oplog, nil
 }
 
