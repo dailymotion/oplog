@@ -99,26 +99,39 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	h.Set("Connection", "keep-alive")
 	h.Set("Access-Control-Allow-Origin", "*")
 
-	lastId := r.Header.Get("Last-Event-ID")
-	found, err := daemon.ol.HasId(lastId)
-	if err != nil {
-		log.Warnf("SSE can't check last id: %s", err)
-		w.WriteHeader(503)
-		return
-	}
-	if found {
-		h.Set("Last-Event-ID", lastId)
-	} else {
-		// If requested id doesn't exists, start the stream from the very last
-		// operation in the oplog and do not return the Last-Event-ID header
-		// to indicate we didn't obey the request
+	var lastId LastId
+	var err error
+	if r.Header.Get("Last-Event-ID") == "" {
+		// No last id provided, use the very last id of the events collection
 		lastId, err = daemon.ol.LastId()
 		if err != nil {
 			log.Warnf("SSE can't get last id: %s", err)
 			w.WriteHeader(503)
 			return
 		}
+	} else {
+		if lastId, err = NewLastId(r.Header.Get("Last-Event-ID")); err != nil {
+			log.Warnf("SSE invalid last id: %s", err)
+			w.WriteHeader(400)
+			return
+		}
+		found, err := daemon.ol.HasId(lastId)
+		if err != nil {
+			log.Warnf("SSE can't check last id: %s", err)
+			w.WriteHeader(503)
+			return
+		}
+		if !found {
+			log.Debug("SSE last id not found, falling back to replication id: ", lastId.String())
+			// If the requested event id is not found, fallback to a replication id
+			olid := lastId.(*OperationLastId)
+			lastId = olid.Fallback()
+		}
+		// Backward compat, remove when all oplogc will be updated
+		h.Set("Last-Event-ID", r.Header.Get("Last-Event-ID"))
 	}
+
+	log.Debug("SSE using last id: ", lastId.String())
 
 	types := []string{}
 	if r.URL.Query().Get("types") != "" {
@@ -155,7 +168,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 			daemon.ol.Stats.EventsSent.Add(1)
 			_, err := op.WriteTo(w)
 			if err != nil {
-				log.Warnf("SSE write error %s", err)
+				log.Warn("SSE write error: ", err)
 				continue
 			}
 			flusher.Flush()

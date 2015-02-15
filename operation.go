@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"time"
 
@@ -31,14 +30,15 @@ type OperationData struct {
 
 // ObjectState is the current state of an object given the most recent operation applied on it
 type ObjectState struct {
-	Id    string         `bson:"_id,omitempty" json:"id"`
-	Event string         `bson:"event"`
-	Data  *OperationData `bson:"data"`
+	Id        string         `bson:"_id,omitempty" json:"id"`
+	Event     string         `bson:"event"`
+	Timestamp time.Time      `bson:"ts"`
+	Data      *OperationData `bson:"data"`
 }
 
-// GetEventId returns an SSE event id as string for the operation
-func (op Operation) GetEventId() string {
-	return op.Id.Hex()
+// GetEventId returns an SSE last event id for the operation
+func (op Operation) GetEventId() LastId {
+	return &OperationLastId{op.Id}
 }
 
 func (op Operation) Validate() error {
@@ -56,7 +56,7 @@ func (op Operation) WriteTo(w io.Writer) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", op.GetEventId(), op.Event, data)
+	n, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", op.Id.Hex(), op.Event, data)
 	return int64(n), err
 }
 
@@ -69,9 +69,9 @@ func (op *Operation) Info() string {
 	return fmt.Sprintf("%s:%s(%s:%s)", id, op.Event, op.Data.Type, op.Data.Id)
 }
 
-// GetEventId returns an SSE event id as string for the object state
-func (obj ObjectState) GetEventId() string {
-	return strconv.FormatInt(obj.Data.Timestamp.UnixNano()/1000000, 10)
+// GetEventId returns an SSE last event id for the object state
+func (obj ObjectState) GetEventId() LastId {
+	return &ReplicationLastId{obj.Timestamp.UnixNano() / 1000000}
 }
 
 // WriteTo serializes an ObjectState as a SSE compatible message
@@ -80,7 +80,7 @@ func (obj ObjectState) WriteTo(w io.Writer) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", obj.GetEventId(), obj.Event, data)
+	n, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", obj.Timestamp.UnixNano()/1000000, obj.Event, data)
 	return int64(n), err
 }
 

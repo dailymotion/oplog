@@ -15,7 +15,7 @@ The agent also exposes a [Server Sent Event](http://dev.w3.org/html5/eventsource
 
 A [full replication] is also supported for freshly spawned consumers that need to have a full view of the data.
 
-Change operations are stored on a central MongoDB server. A [tailable cursor](http://docs.mongodb.org/manual/tutorial/create-tailable-cursor/) on a MongoDB [capped collection](http://docs.mongodb.org/manual/core/capped-collections) is used for real-time updates and final stats of objects is maintained in a secondary collection for full replication support. The actual data is not stored in the OpLog's data store ; the monitored API continues to serve as the authoritative source of data and as the gatekeeper for it (authen/authz). Only modified object's `type` and `id` are stored together with the timestamp of the update and some related "parent" object references, useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from their API. An optional reference to the modified object can be provided by the OpLog API if the URL schema is setup (see [Starting the agent] below for more info).
+Change operations are stored on a central MongoDB server. A [tailable cursor](http://docs.mongodb.org/manual/tutorial/create-tailable-cursor/) on a MongoDB [capped collection](http://docs.mongodb.org/manual/core/capped-collections) is used for real-time updates and final states of objects is maintained in a secondary collection for full replication support. The actual data is not stored in the OpLog's data store ; the monitored API continues to serve as the authoritative source of data and as the gatekeeper for it (authen/authz). Only modified object's `type` and `id` are stored together with the timestamp of the update and some related "parent" object references, useful for filtering. What you put in `type`, `id` and `parents` is up to the service, and must be meaningful to fetch the actual objects data from their API. An optional reference to the modified object can be provided by the OpLog API if the URL schema is setup (see [Starting the agent] below for more info).
 
 As the it is highly expected that the OpLog may miss some operations from the API, a [Periodical Source Synchronization] mechanism is available
 
@@ -42,11 +42,11 @@ To start the agent, run the following command:
 
     oplogd --mongo-url mongodb://[username:password@]host1[:port1][,host2[:port2],...[,hostN[:portN]]]/database[?options]
 
-The `oplog` and `objects` collections will be created in the specified database.
+The `oplog_events` and `oplog_states` collections will be created in the specified database. It is advised to dedicate a database to this service in order to not to share locks contention with another services.
 
 Available options:
 
-* `--capped-collection-size=104857600`: Size of the created MongoDB capped collection size in bytes (default 100MB).
+* `--capped-collection-size=10485760`: Size of the created MongoDB capped collection size in bytes (default 10MB).
 * `--debug=false`: Show debug log messages.
 * `--listen=":8042"`: The address to listen on. Same address is used for both SSE(HTTP) and UDP APIs.
 * `--max-queued-events=100000`: Number of events to queue before starting throwing up UDP messages.
@@ -86,7 +86,7 @@ The [SSE](http://dev.w3.org/html5/eventsource/) API runs on the same port as UDP
 
 The W3C SSE protocol is respected by the book. To connect to the API, a GET on `/` with the `Accept: text/event-stream` header is performed. If no `Last-Event-ID` HTTP header is passed, the OpLog server will start sending all future operations with no backlog. On each received operation, the client must store the last associated "event id" as operations are treated. This event id will be used to resume the stream where it has been left in the case of a disconnect. The client just has to send the last consumed "event id" using the `Last-Event-ID` HTTP header.
 
-In return, the client must ensure the `Last-Event-ID` header is sent back in the response. It the case that the id defined by `Last-Event-ID` is no longer available in the underlying capped collection, the agent won't send the backlog as if the `Last-Event-ID` header hadn't been sent. The requested `Last-Event-ID` header won't be sent back in the response either. You may want to perform a full replication when this occurs.
+It the case that the id defined by `Last-Event-ID` is no longer available in the underlying "oplog_events" capped collection, the agent will automatically fallback to replication by converting the oplog event id into a timestamp.
 
 The following filters can be passed as a query-string:
 * `types` A list of object types to filter on separated by comas (i.e.: `types=video,user`).

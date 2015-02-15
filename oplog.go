@@ -6,9 +6,7 @@
 package oplog
 
 import (
-	"fmt"
 	"io"
-	"strconv"
 	"sync"
 	"time"
 
@@ -27,58 +25,7 @@ type OpLog struct {
 	ObjectURL string
 }
 
-type OpLogFilter struct {
-	Types   []string
-	Parents []string
-}
-
-type GenericEvent interface {
-	io.WriterTo
-	GetEventId() string
-}
-
-// OpLogEvent is used to send "technical" events with no data like "reset" or "live"
-type OpLogEvent struct {
-	Id    string
-	Event string
-}
-
 type OperationDataMap map[string]OperationData
-
-// parseObjectId returns a bson.ObjectId from an hex representation of an object id or nil
-// if an empty string is passed or if the format of the id wasn't valid
-func parseObjectId(id string) *bson.ObjectId {
-	if id != "" && bson.IsObjectIdHex(id) {
-		oid := bson.ObjectIdHex(id)
-		return &oid
-	}
-	return nil
-}
-
-// parseTimestampId try to find a millisecond timestamp in the string and return it or return
-// false as second value if can be parsed
-func parseTimestampId(id string) (ts int64, ok bool) {
-	ts = -1
-	ok = false
-	if len(id) <= 13 {
-		if i, err := strconv.ParseInt(id, 10, 64); err == nil {
-			ts = i
-			ok = true
-		}
-	}
-	return
-}
-
-// GetEventId returns an SSE event id
-func (e OpLogEvent) GetEventId() string {
-	return e.Id
-}
-
-// WriteTo serializes an event as a SSE compatible message
-func (e OpLogEvent) WriteTo(w io.Writer) (int64, error) {
-	n, err := fmt.Fprintf(w, "id: %s\nevent: %s\n\n", e.GetEventId(), e.Event)
-	return int64(n), err
-}
 
 // New returns an OpLog connected to the given provided mongo URL.
 // If the capped collection does not exists, it will be created with the max
@@ -113,15 +60,15 @@ func (oplog *OpLog) init(maxBytes int) {
 	names, _ := oplog.s.DB("").CollectionNames()
 	for _, name := range names {
 		switch name {
-		case "oplog":
+		case "oplog_events":
 			oplogExists = true
-		case "objects":
+		case "oplog_states":
 			objectsExists = true
 		}
 	}
 	if !oplogExists {
 		log.Info("OPLOG creating capped collection")
-		err := oplog.s.DB("").C("oplog").Create(&mgo.CollectionInfo{
+		err := oplog.s.DB("").C("oplog_events").Create(&mgo.CollectionInfo{
 			Capped:   true,
 			MaxBytes: maxBytes,
 		})
@@ -131,13 +78,13 @@ func (oplog *OpLog) init(maxBytes int) {
 	}
 	if !objectsExists {
 		log.Info("OPLOG creating objects index")
-		c := oplog.s.DB("").C("objects")
+		c := oplog.s.DB("").C("oplog_states")
 		// Replication query
-		if err := c.EnsureIndexKey("event", "data.ts"); err != nil {
+		if err := c.EnsureIndexKey("event", "ts"); err != nil {
 			log.Fatal(err)
 		}
 		// Replication query with a filter on types
-		if err := c.EnsureIndexKey("event", "data.t", "data.ts"); err != nil {
+		if err := c.EnsureIndexKey("event", "data.t", "ts"); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -170,7 +117,7 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 	b.MaxElapsedTime = 0 // Retry forever
 	b.Reset()
 	for {
-		if err := db.C("oplog").Insert(op); err != nil {
+		if err := db.C("oplog_events").Insert(op); err != nil {
 			log.Warnf("OPLOG can't insert operation, retrying: %s", err)
 			// Retry with backoff
 			time.Sleep(b.NextBackOff())
@@ -187,13 +134,14 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 		event = "insert"
 	}
 	o := ObjectState{
-		Id:    op.Data.GetId(),
-		Event: event,
-		Data:  op.Data,
+		Id:        op.Data.GetId(),
+		Event:     event,
+		Timestamp: time.Now(),
+		Data:      op.Data,
 	}
 	b.Reset()
 	for {
-		if _, err := db.C("objects").Upsert(bson.M{"_id": o.Id}, o); err != nil {
+		if _, err := db.C("oplog_states").Upsert(bson.M{"_id": o.Id}, o); err != nil {
 			log.Warnf("OPLOG can't upsert object, retrying: %s", err)
 			// Retry with backoff
 			time.Sleep(b.NextBackOff())
@@ -226,7 +174,7 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, updateMap OperationDataMap,
 	}
 
 	obs := ObjectState{}
-	iter := db.C("objects").Find(bson.M{}).Iter()
+	iter := db.C("oplog_states").Find(bson.M{}).Iter()
 	for iter.Next(&obs) {
 		if obs.Event == "deleted" {
 			if obd, ok := createMap[obs.Id]; ok {
@@ -265,88 +213,53 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, updateMap OperationDataMap,
 }
 
 // HasId checks if an operation id is present in the capped collection.
-func (oplog *OpLog) HasId(id string) (bool, error) {
-	if id == "" {
-		return false, nil
+func (oplog *OpLog) HasId(id LastId) (bool, error) {
+	if olid, ok := id.(*OperationLastId); ok {
+		db := oplog.DB()
+		defer db.Session.Close()
+		count, err := db.C("oplog_events").FindId(olid.ObjectId).Count()
+		return count != 0, err
 	}
 
-	_, ok := parseTimestampId(id)
-	if ok {
-		// Id is a timestamp, timestamp are always valid
-		return true, nil
-	}
-
-	oid := parseObjectId(id)
-	if oid == nil {
-		return false, nil
-	}
-
-	db := oplog.DB()
-	defer db.Session.Close()
-	count, err := db.C("oplog").FindId(oid).Count()
-	return count != 0, err
+	// Replication id are always found as they are timestamps
+	return true, nil
 }
 
-// LastId returns the most recently inserted operation id if any or "" if oplog is empty
-func (oplog *OpLog) LastId() (string, error) {
+// LastId returns the most recently inserted operation id if any or nil if oplog is empty
+func (oplog *OpLog) LastId() (LastId, error) {
 	db := oplog.DB()
 	defer db.Session.Close()
 	operation := &Operation{}
-	err := db.C("oplog").Find(nil).Sort("-$natural").One(operation)
+	err := db.C("oplog_events").Find(nil).Sort("-$natural").One(operation)
 	if err == mgo.ErrNotFound {
-		return "", nil
+		return nil, nil
 	}
 	if operation.Id != nil {
-		return operation.Id.Hex(), nil
+		return &OperationLastId{operation.Id}, nil
 	}
-	return "", err
+	return nil, err
 }
 
 // iter creates either an iterator on the objects collection if the lastId is a timestamp
 // or tailable cursor on the oplog capped collection otherwise
-func (oplog *OpLog) iter(db *mgo.Database, lastId string, filter OpLogFilter) (iter *mgo.Iter, err error, streaming bool) {
+func (oplog *OpLog) iter(db *mgo.Database, lastId LastId, filter OpLogFilter) (iter *mgo.Iter, err error, streaming bool) {
 	query := bson.M{}
+	filter.apply(&query)
 
-	switch len(filter.Types) {
-	case 0:
-		// Do nothing
-	case 1:
-		query["data.t"] = filter.Types[0]
-	default: // > 1
-		query["data.t"] = bson.M{"$in": filter.Types}
-	}
-
-	switch len(filter.Parents) {
-	case 0:
-		// Do nothing
-	case 1:
-		query["data.p"] = filter.Parents[0]
-	default: // > 1
-		query["data.p"] = bson.M{"$in": filter.Parents}
-	}
-
-	if ts, ok := parseTimestampId(lastId); ok {
-		if ts > 0 {
+	if r, ok := lastId.(*ReplicationLastId); ok {
+		if r.int64 > 0 {
 			// Id is a timestamp, timestamp are always valid
-			query["data.ts"] = bson.M{"$gte": time.Unix(0, ts*1000000)}
+			query["ts"] = bson.M{"$gte": time.Unix(0, r.int64*1000000)}
 		}
 		query["event"] = bson.M{"$ne": "delete"}
-		iter = db.C("objects").Find(query).Sort("data.ts").Iter()
+		iter = db.C("oplog_states").Find(query).Sort("ts").Iter()
 		streaming = false
 	} else {
-		oid := parseObjectId(lastId)
-		if oid == nil {
-			// If no last id provided, find the last operation id in the colleciton
-			lastId, err = oplog.LastId()
-			if err != nil {
-				return
-			}
-			oid = parseObjectId(lastId)
+		if lastId != nil {
+			o := lastId.(*OperationLastId)
+			query["_id"] = bson.M{"$gt": o.ObjectId}
 		}
-		if oid != nil {
-			query["_id"] = bson.M{"$gt": oid}
-		}
-		iter = db.C("oplog").Find(query).Sort("$natural").Tail(5 * time.Second)
+		iter = db.C("oplog_events").Find(query).Sort("$natural").Tail(5 * time.Second)
 		streaming = true
 	}
 	return
@@ -356,18 +269,18 @@ func (oplog *OpLog) iter(db *mgo.Database, lastId string, filter OpLogFilter) (i
 // the given channel. If the lastId parameter is given, all operation posted after
 // this event will be returned.
 //
-// If the lastId is a unix timestamp in milliseconds, the tailing will start by replicating
-// all the objects last updated after the timestamp.
+// If the lastId is a ReplicationLastId (unix timestamp in milliseconds), the tailing will
+// start by replicating all the objects last updated after the timestamp.
 //
 // Giving a lastId of 0 mean replicating all the stored objects before tailing the live updates.
 //
 // The filter argument can be used to filter on some type of objects or objects with given parrents.
 //
 // The create, update, delete events are streamed back to the sender thru the out channel
-func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.WriterTo, stop <-chan bool) {
+func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.WriterTo, stop <-chan bool) {
 	var lastEv GenericEvent
 
-	if lastId == "0" {
+	if r, ok := lastId.(*ReplicationLastId); ok && r.int64 == 0 {
 		// When full replication is requested, start by sending a "reset" event to instruct
 		// the consumer to reset its database before processing further operations.
 		// The id is 1 so if connection is lost after this event and consumer processed the event,
@@ -471,7 +384,7 @@ func (oplog *OpLog) Tail(lastId string, filter OpLogFilter, out chan<- io.Writer
 					// the "live" event.
 					liveId := "" // default value
 					if lastEv != nil {
-						liveId = lastEv.GetEventId()
+						liveId = lastEv.GetEventId().String()
 					}
 					out <- &OpLogEvent{
 						Id:    liveId,
