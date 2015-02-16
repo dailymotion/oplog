@@ -61,7 +61,7 @@ func (oplog *OpLog) init(maxBytes int) {
 	names, _ := oplog.s.DB("").CollectionNames()
 	for _, name := range names {
 		switch name {
-		case "oplog_events":
+		case "oplog_ops":
 			oplogExists = true
 		case "oplog_states":
 			objectsExists = true
@@ -69,7 +69,7 @@ func (oplog *OpLog) init(maxBytes int) {
 	}
 	if !oplogExists {
 		log.Info("OPLOG creating capped collection")
-		err := oplog.s.DB("").C("oplog_events").Create(&mgo.CollectionInfo{
+		err := oplog.s.DB("").C("oplog_ops").Create(&mgo.CollectionInfo{
 			Capped:   true,
 			MaxBytes: maxBytes,
 		})
@@ -126,7 +126,7 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 	b.MaxElapsedTime = 0 // Retry forever
 	b.Reset()
 	for {
-		if err := db.C("oplog_events").Insert(op); err != nil {
+		if err := db.C("oplog_ops").Insert(op); err != nil {
 			log.Warnf("OPLOG can't insert operation, retrying: %s", err)
 			// Retry with backoff
 			time.Sleep(b.NextBackOff())
@@ -226,7 +226,7 @@ func (oplog *OpLog) HasId(id LastId) (bool, error) {
 	if olid, ok := id.(*OperationLastId); ok {
 		db := oplog.DB()
 		defer db.Session.Close()
-		count, err := db.C("oplog_events").FindId(olid.ObjectId).Count()
+		count, err := db.C("oplog_ops").FindId(olid.ObjectId).Count()
 		return count != 0, err
 	}
 
@@ -239,7 +239,7 @@ func (oplog *OpLog) LastId() (LastId, error) {
 	db := oplog.DB()
 	defer db.Session.Close()
 	operation := &Operation{}
-	err := db.C("oplog_events").Find(nil).Sort("-$natural").One(operation)
+	err := db.C("oplog_ops").Find(nil).Sort("-$natural").One(operation)
 	if err == mgo.ErrNotFound {
 		return nil, nil
 	}
@@ -273,7 +273,7 @@ func (oplog *OpLog) iter(db *mgo.Database, lastId LastId, filter OpLogFilter) (i
 			o := lastId.(*OperationLastId)
 			query["_id"] = bson.M{"$gt": o.ObjectId}
 		}
-		iter = db.C("oplog_events").Find(query).Sort("$natural").Tail(5 * time.Second)
+		iter = db.C("oplog_ops").Find(query).Sort("$natural").Tail(5 * time.Second)
 		streaming = true
 	}
 	return

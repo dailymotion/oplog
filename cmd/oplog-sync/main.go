@@ -37,7 +37,7 @@ var (
 	debug                = flag.Bool("debug", false, "Show debug log messages.")
 	dryRun               = flag.Bool("dry-run", false, "Compute diff but do not generate events.")
 	mongoURL             = flag.String("mongo-url", "", "MongoDB URL to connect to.")
-	cappedCollectionSize = flag.Int("capped-collection-size", 104857600, "Size of the created MongoDB capped collection size in bytes (default 100MB).")
+	cappedCollectionSize = flag.Int("capped-collection-size", 1048576, "Size of the created MongoDB capped collection size in bytes (default 1MB).")
 	maxQueuedEvents      = flag.Uint64("max-queued-events", 100000, "Number of events to queue before starting throwing UDP messages.")
 )
 

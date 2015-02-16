@@ -42,7 +42,7 @@ To start the agent, run the following command:
 
     oplogd --mongo-url mongodb://[username:password@]host1[:port1][,host2[:port2],...[,hostN[:portN]]]/database[?options]
 
-The `oplog_events` and `oplog_states` collections will be created in the specified database. It is advised to dedicate a database to this service in order to not to share locks contention with another services.
+The `oplog_ops` and `oplog_states` collections will be created in the specified database. It is advised to dedicate a database to this service in order to not to share locks contention with another services.
 
 Available options:
 
@@ -86,7 +86,7 @@ The [SSE](http://dev.w3.org/html5/eventsource/) API runs on the same port as UDP
 
 The W3C SSE protocol is respected by the book. To connect to the API, a GET on `/` with the `Accept: text/event-stream` header is performed. If no `Last-Event-ID` HTTP header is passed, the OpLog server will start sending all future operations with no backlog. On each received operation, the client must store the last associated "event id" as operations are treated. This event id will be used to resume the stream where it has been left in the case of a disconnect. The client just has to send the last consumed "event id" using the `Last-Event-ID` HTTP header.
 
-It the case that the id defined by `Last-Event-ID` is no longer available in the underlying "oplog_events" capped collection, the agent will automatically fallback to replication by converting the oplog event id into a timestamp.
+It the case that the id defined by `Last-Event-ID` is no longer available in the underlying `oplog_ops` capped collection, the agent will automatically fallback to `oplog_states` by converting the oplog event id into a timestamp.
 
 The following filters can be passed as a query-string:
 * `types` A list of object types to filter on separated by comas (i.e.: `types=video,user`).
