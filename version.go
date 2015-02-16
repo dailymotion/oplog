@@ -1,3 +1,3 @@
 package oplog
 
-var VERSION string = "1.1.1"
+var VERSION string = "1.1.2"
