@@ -157,12 +157,12 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	go daemon.ol.Tail(lastId, filter, ops, stop)
 	daemon.ol.Stats.Clients.Add(1)
 	daemon.ol.Stats.Connections.Add(1)
+	defer daemon.ol.Stats.Clients.Add(-1)
 
 	for {
 		select {
 		case <-notifier.CloseNotify():
 			log.Info("SSE connection closed")
-			daemon.ol.Stats.Clients.Add(-1)
 			stop <- true
 			return
 		case op := <-ops:
