@@ -294,14 +294,16 @@ func (oplog *OpLog) iter(db *mgo.Database, lastId LastId, filter OpLogFilter) (i
 func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.WriterTo, stop <-chan bool) {
 	var lastEv GenericEvent
 
-	if r, ok := lastId.(*ReplicationLastId); ok && r.int64 == 0 {
-		// When full replication is requested, start by sending a "reset" event to instruct
-		// the consumer to reset its database before processing further operations.
-		// The id is 1 so if connection is lost after this event and consumer processed the event,
-		// the connection recover won't trigger a second "reset" event.
-		out <- &OpLogEvent{
-			Id:    "1",
-			Event: "reset",
+	if lastId != nil {
+		if r, ok := lastId.(*ReplicationLastId); ok && r.int64 == 0 {
+			// When full replication is requested, start by sending a "reset" event to instruct
+			// the consumer to reset its database before processing further operations.
+			// The id is 1 so if connection is lost after this event and consumer processed the event,
+			// the connection recover won't trigger a second "reset" event.
+			out <- &OpLogEvent{
+				Id:    "1",
+				Event: "reset",
+			}
 		}
 	}
 
@@ -333,7 +335,6 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 				log.Warnf("OPLOG tail failed with error, try to reconnect: %s", err)
 			} else if streaming {
 				log.Debug("OPLOG start live updates")
-				b.Reset()
 
 				operation := Operation{}
 				for {
@@ -360,10 +361,18 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 
 				if iter.Err() != nil {
 					log.Warnf("OPLOG tail failed with error, try to reconnect: %s", iter.Err())
+				} else if operation.Id == nil {
+					// This mostly happen when the tail cursor is on an empty collection
+					log.Debug("OPLOG ops collection is empty, retrying")
+					time.Sleep(b.NextBackOff())
+					continue
+				} else {
+					// Reset the backoff counter
+					b.Reset()
 				}
 			} else {
 				log.Debug("OPLOG start replication")
-				b.Reset()
+
 				// Capture the current oplog position in order to resume at this position
 				// once initial replication is done
 				replicationFallbackId, err := oplog.LastId()
@@ -408,6 +417,9 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 					// was started
 					lastId = replicationFallbackId
 					lastEv = nil
+
+					// Reset the backoff counter
+					b.Reset()
 				}
 			}
 

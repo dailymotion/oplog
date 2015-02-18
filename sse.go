@@ -131,7 +131,9 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 		h.Set("Last-Event-ID", r.Header.Get("Last-Event-ID"))
 	}
 
-	log.Debug("SSE using last id: ", lastId.String())
+	if lastId != nil {
+		log.Debug("SSE using last id: ", lastId.String())
+	}
 
 	types := []string{}
 	if r.URL.Query().Get("types") != "" {
