@@ -155,6 +155,11 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	go daemon.ol.Tail(lastId, filter, ops, stop)
+	defer func() {
+		// Stop the oplog tailer
+		stop <- true
+	}()
+
 	daemon.ol.Stats.Clients.Add(1)
 	daemon.ol.Stats.Connections.Add(1)
 	defer daemon.ol.Stats.Clients.Add(-1)
@@ -163,22 +168,23 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-notifier.CloseNotify():
 			log.Info("SSE connection closed")
-			stop <- true
 			return
 		case op := <-ops:
 			log.Debug("SSE sending event")
 			daemon.ol.Stats.EventsSent.Add(1)
-			_, err := op.WriteTo(w)
-			if err != nil {
+			if _, err := op.WriteTo(w); err != nil {
 				log.Warn("SSE write error: ", err)
-				continue
+				return
 			}
 			flusher.Flush()
 		case <-time.After(25 * time.Second):
 			// Send "ping" data to prevent proxy/browsers from closing the connection
 			// for inactivity
 			log.Debug("SSE sending a keep alive ping")
-			w.Write([]byte{':', '\n'})
+			if _, err := w.Write([]byte{':', '\n'}); err != nil {
+				log.Warn("SSE write error: ", err)
+				return
+			}
 			flusher.Flush()
 		}
 	}
