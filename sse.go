@@ -96,7 +96,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	h.Set("Server", fmt.Sprintf("oplog/%s", VERSION))
 	h.Set("Content-Type", "text/event-stream; charset=utf-8")
 	h.Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	h.Set("Connection", "keep-alive")
+	h.Set("Connection", "close")
 	h.Set("Access-Control-Allow-Origin", "*")
 
 	var lastId LastId
