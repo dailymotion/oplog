@@ -10,6 +10,7 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/sebest/xff"
 )
 
 // SSEDaemon listens for events and send them to the oplog MongoDB capped collection
@@ -79,7 +80,8 @@ func (daemon *SSEDaemon) Status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
-	log.Info("SSE connection started")
+	ip := xff.GetRemoteAddr(r)
+	log.Infof("SSE[%s] connection started", ip)
 
 	if r.Header.Get("Accept") != "text/event-stream" {
 		// Not an event stream request, return a 406 Not Acceptable HTTP error
@@ -105,24 +107,24 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 		// No last id provided, use the very last id of the events collection
 		lastId, err = daemon.ol.LastId()
 		if err != nil {
-			log.Warnf("SSE can't get last id: %s", err)
+			log.Warnf("SSE[%s] can't get last id: %s", ip, err)
 			w.WriteHeader(503)
 			return
 		}
 	} else {
 		if lastId, err = NewLastId(r.Header.Get("Last-Event-ID")); err != nil {
-			log.Warnf("SSE invalid last id: %s", err)
+			log.Warnf("SSE[%s] invalid last id: %s", ip, err)
 			w.WriteHeader(400)
 			return
 		}
 		found, err := daemon.ol.HasId(lastId)
 		if err != nil {
-			log.Warnf("SSE can't check last id: %s", err)
+			log.Warnf("SSE[%s] can't check last id: %s", ip, err)
 			w.WriteHeader(503)
 			return
 		}
 		if !found {
-			log.Debug("SSE last id not found, falling back to replication id: ", lastId.String())
+			log.Debugf("SSE[%s] last id not found, falling back to replication id: %s", ip, lastId.String())
 			// If the requested event id is not found, fallback to a replication id
 			olid := lastId.(*OperationLastId)
 			lastId = olid.Fallback()
@@ -132,7 +134,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if lastId != nil {
-		log.Debug("SSE using last id: ", lastId.String())
+		log.Debugf("SSE[%s] using last id: %s", ip, lastId.String())
 	}
 
 	types := []string{}
@@ -167,22 +169,22 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-notifier.CloseNotify():
-			log.Info("SSE connection closed")
+			log.Infof("SSE[%s] connection closed", ip)
 			return
 		case op := <-ops:
-			log.Debug("SSE sending event")
+			log.Debugf("SSE[%s] sending event", ip)
 			daemon.ol.Stats.EventsSent.Add(1)
 			if _, err := op.WriteTo(w); err != nil {
-				log.Warn("SSE write error: ", err)
+				log.Warnf("SSE[%s] write error: %s", ip, err)
 				return
 			}
 			flusher.Flush()
 		case <-time.After(25 * time.Second):
 			// Send "ping" data to prevent proxy/browsers from closing the connection
 			// for inactivity
-			log.Debug("SSE sending a keep alive ping")
+			log.Debugf("SSE[%s] sending a keep alive ping", ip)
 			if _, err := w.Write([]byte{':', '\n'}); err != nil {
-				log.Warn("SSE write error: ", err)
+				log.Warnf("SSE[%s] write error: ", ip, err)
 				return
 			}
 			flusher.Flush()
