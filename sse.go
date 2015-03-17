@@ -19,10 +19,20 @@ type SSEDaemon struct {
 	ol *OpLog
 	// Password is the shared secret to connect to a password protected oplog.
 	Password string
+	// FlushInterval defines the interval between flushes of the HTTP socket.
+	FlushInterval time.Duration
+	// HeartbeatTickerCount defines the number of FlushInterval with nothing to flush
+	// is required before we send an heartbeat.
+	HeartbeatTickerCount int8
 }
 
 func NewSSEDaemon(addr string, ol *OpLog) *SSEDaemon {
-	daemon := &SSEDaemon{nil, ol, ""}
+	daemon := &SSEDaemon{
+		ol:                   ol,
+		Password:             "",
+		FlushInterval:        500 * time.Millisecond,
+		HeartbeatTickerCount: 50, // 25 seconds
+	}
 	daemon.s = &http.Server{
 		Addr:           addr,
 		Handler:        daemon,
@@ -166,11 +176,17 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	daemon.ol.Stats.Connections.Add(1)
 	defer daemon.ol.Stats.Clients.Add(-1)
 
+	// Messages are buffered and flushed every daemon.FlushInterval to save I/Os
+	ticker := time.NewTicker(daemon.FlushInterval)
+	defer ticker.Stop()
+	var empty int8
+
 	for {
 		select {
 		case <-notifier.CloseNotify():
 			log.Infof("SSE[%s] connection closed", ip)
 			return
+
 		case op := <-ops:
 			log.Debugf("SSE[%s] sending event", ip)
 			daemon.ol.Stats.EventsSent.Add(1)
@@ -178,15 +194,24 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 				log.Warnf("SSE[%s] write error: %s", ip, err)
 				return
 			}
-			flusher.Flush()
-		case <-time.After(25 * time.Second):
-			// Send "ping" data to prevent proxy/browsers from closing the connection
-			// for inactivity
-			log.Debugf("SSE[%s] sending a keep alive ping", ip)
-			if _, err := w.Write([]byte{':', '\n'}); err != nil {
-				log.Warnf("SSE[%s] write error: ", ip, err)
-				return
+			empty = -1
+
+		case <-ticker.C:
+			// Flush the buffer at regular interval
+			if empty >= 0 {
+				// Skip if buffer has no data, if empty for too long, send a heartbeat
+				if empty >= daemon.HeartbeatTickerCount {
+					if _, err := w.Write([]byte{':', '\n'}); err != nil {
+						log.Warnf("SSE[%s] write error: %s", ip, err)
+						return
+					}
+				} else {
+					empty++
+					continue
+				}
 			}
+			empty = 0
+			log.Debugf("SSE[%s] flushing buffer", ip)
 			flusher.Flush()
 		}
 	}
