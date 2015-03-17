@@ -264,7 +264,7 @@ func (oplog *OpLog) iter(db *mgo.Database, lastId LastId, filter OpLogFilter) (i
 			// In replication mode, do only notify about inserts
 			// In fallback mode (when operation id is no longer in the capped collection),
 			// we must not filter deletes otherwise the consumer will get out of sync
-			query["event"] = bson.M{"$ne": "delete"}
+			query["event"] = "insert"
 		}
 		iter = db.C("oplog_states").Find(query).Sort("ts").Iter()
 		streaming = false
