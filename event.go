@@ -3,6 +3,7 @@ package oplog
 import (
 	"fmt"
 	"io"
+	"time"
 )
 
 // GenericEvent is an interface used by the oplog to send different kinds of
@@ -35,4 +36,8 @@ func (e OpLogEvent) WriteTo(w io.Writer) (int64, error) {
 
 func (gid *GenericLastEventId) String() string {
 	return gid.string
+}
+
+func (gid *GenericLastEventId) Time() time.Time {
+	return time.Time{}
 }

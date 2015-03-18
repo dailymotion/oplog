@@ -23,6 +23,8 @@ type OpLog struct {
 	// The URL can use {{type}} and {{id}} template as follow: http://api.mydomain.com/{{type}}/{{id}}.
 	// If not provided, no "ref" field will be included in oplog events.
 	ObjectURL string
+	// Number of object to fetch from the states collection per page.
+	PageSize int
 }
 
 type OperationDataMap map[string]OperationData
@@ -40,8 +42,9 @@ func New(mongoURL string, maxBytes int) (*OpLog, error) {
 	session.SetSafe(&mgo.Safe{})
 	stats := NewStats()
 	oplog := &OpLog{
-		s:     session,
-		Stats: &stats,
+		s:        session,
+		Stats:    &stats,
+		PageSize: 1000,
 	}
 	oplog.init(maxBytes)
 	// Setting monotonic before collection fails with a "not master" error
@@ -249,36 +252,6 @@ func (oplog *OpLog) LastId() (LastId, error) {
 	return nil, err
 }
 
-// iter creates either an iterator on the states collection if the lastId is a timestamp
-// or a tailable cursor on the events capped collection otherwise
-func (oplog *OpLog) iter(db *mgo.Database, lastId LastId, filter OpLogFilter) (iter *mgo.Iter, err error, streaming bool) {
-	query := bson.M{}
-	filter.apply(&query)
-
-	if r, ok := lastId.(*ReplicationLastId); ok {
-		if r.int64 > 0 {
-			// Id is a timestamp, timestamp are always valid
-			query["ts"] = bson.M{"$gte": time.Unix(0, r.int64*1000000)}
-		}
-		if !r.fallbackMode {
-			// In replication mode, do only notify about inserts
-			// In fallback mode (when operation id is no longer in the capped collection),
-			// we must not filter deletes otherwise the consumer will get out of sync
-			query["event"] = "insert"
-		}
-		iter = db.C("oplog_states").Find(query).Sort("ts").Iter()
-		streaming = false
-	} else {
-		if lastId != nil {
-			o := lastId.(*OperationLastId)
-			query["_id"] = bson.M{"$gt": o.ObjectId}
-		}
-		iter = db.C("oplog_ops").Find(query).Sort("$natural").Tail(5 * time.Second)
-		streaming = true
-	}
-	return
-}
-
 // Tail tails all the new operations in the oplog and send the operation in
 // the given channel. If the lastId parameter is given, all operation posted after
 // this event will be returned.
@@ -324,39 +297,57 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 		db := oplog.DB()
 		defer db.Session.Close()
 
+		var iter *mgo.Iter
+		defer func() {
+			if iter != nil {
+				iter.Close()
+			}
+		}()
+
 		b := backoff.NewExponentialBackOff()
 		b.MaxElapsedTime = 0 // Retry forever
 		b.Reset()
 
-		for {
-			iter, err, streaming := oplog.iter(db, lastId, filter)
+		var replicationFallbackId LastId
 
-			if err != nil {
-				log.Warnf("OPLOG tail failed with error, try to reconnect: %s", err)
-			} else if streaming {
+		for {
+			var err error
+
+			if i, ok := lastId.(*OperationLastId); ok {
 				log.Debug("OPLOG start live updates")
+
+				query := bson.M{}
+				filter.apply(&query)
+				if i != nil {
+					// Resuming at given last id
+					query["_id"] = bson.M{"$gt": i.ObjectId}
+				}
+				iter = db.C("oplog_ops").Find(query).Sort("$natural").Tail(5 * time.Second)
 
 				operation := Operation{}
 				for {
 					for iter.Next(&operation) {
 						if isDone() {
-							iter.Close()
-							break
+							return
 						}
 						if oplog.ObjectURL != "" {
+							// If object URL template is provided, generate it from operation's data
 							operation.Data.genRef(oplog.ObjectURL)
 						}
 						out <- operation
+						// Save current event for resume
 						lastEv = operation
 					}
 
-					if isDone() || !iter.Timeout() {
-						break
+					if iter.Timeout() {
+						// On tail timeout, just wait again
+						continue
 					}
+					break
 				}
 
 				if isDone() {
-					break
+					return
 				}
 
 				if iter.Err() != nil {
@@ -370,59 +361,103 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 					// Reset the backoff counter
 					b.Reset()
 				}
-			} else {
+			} else if i, ok := lastId.(*ReplicationLastId); ok {
 				log.Debug("OPLOG start replication")
 
 				// Capture the current oplog position in order to resume at this position
-				// once initial replication is done
-				replicationFallbackId, err := oplog.LastId()
+				// once replication or fallback is done. This also serves a upper limit for
+				// the fetching of the data.
+				if replicationFallbackId, err = oplog.LastId(); err != nil {
+					log.Warnf("OPLOG error retriving replication fallback id: %s", err)
+					goto retry
+				}
 
-				if err == nil {
+				query := bson.M{}
+				filter.apply(&query)
+				tsClause := bson.M{}
+				query["ts"] = tsClause
+				if i.int64 > 0 {
+					// Id is a timestamp, timestamp are always valid
+					tsClause["$gte"] = i.Time()
+				}
+				if replicationFallbackId != nil {
+					// Do not fetch any new object modified after the current most recent operation
+					tsClause["$lte"] = replicationFallbackId.Time()
+				}
+				if !i.fallbackMode {
+					// In replication mode, do only notify about inserts
+					// In fallback mode (when operation id is no longer in the capped collection),
+					// we must not filter deletes otherwise the consumer will get out of sync
+					query["event"] = "insert"
+				}
+
+				for {
+					// Iterate over the collection using "page" of 1000 items so we don't hold a read lock
+					// on the db for too long when the states collection is large or the reader is slow
+					iter = db.C("oplog_states").Find(query).Sort("ts").Limit(oplog.PageSize).Iter()
+
+					c := 0
 					object := ObjectState{}
 					for iter.Next(&object) {
 						if isDone() {
-							iter.Close()
-							break
+							return
 						}
 						if oplog.ObjectURL != "" {
 							object.Data.genRef(oplog.ObjectURL)
 						}
 						out <- object
+						// Save current event for resume
 						lastEv = object
+						c++
 					}
-				}
 
-				if isDone() {
+					if isDone() {
+						return
+					}
+
+					if iter.Err() != nil {
+						log.Warnf("OPLOG replication failed with error, retrying: %s", iter.Err())
+						goto retry
+					}
+
+					if lastEv != nil && c == oplog.PageSize {
+						// We consumed on page of event, go to the next page
+						tsClause["$gte"] = lastEv.GetEventId().Time()
+						continue
+					}
+
+					// When the number of returned item is lower than page size, we can assume we where
+					// on the last "page".
 					break
 				}
 
-				if err != nil || iter.Err() != nil {
-					log.Warnf("OPLOG replication failed with error, retrying: %s", iter.Err())
-				} else {
-					// Replication is done, notify and swtich to live event stream
-					//
-					// Send a "live" operation to inform the consumer it is no live event stream.
-					// We use the last event id here in order to ensure the consumer will resume
-					// the replication starting at this point in time in case of a failure after
-					// the "live" event.
-					liveId := "" // default value
-					if lastEv != nil {
-						liveId = lastEv.GetEventId().String()
-					}
-					out <- &OpLogEvent{
-						Id:    liveId,
-						Event: "live",
-					}
-					// Switch to live update at the last operation id inserted before the replication
-					// was started
-					lastId = replicationFallbackId
-					lastEv = nil
-
-					// Reset the backoff counter
-					b.Reset()
+				// Replication is done, notify and swtich to live event stream
+				//
+				// Send a "live" operation to inform the consumer it is no live event stream.
+				// We use the last event id here in order to ensure the consumer will resume
+				// the replication starting at this point in time in case of a failure after
+				// the "live" event.
+				liveId := "" // default value
+				if lastEv != nil {
+					liveId = lastEv.GetEventId().String()
 				}
+				out <- &OpLogEvent{
+					Id:    liveId,
+					Event: "live",
+				}
+				// Switch to live update at the last operation id inserted before the replication
+				// was started
+				lastId = replicationFallbackId
+				replicationFallbackId = nil
+				lastEv = nil
+
+				// Reset the backoff counter
+				b.Reset()
+			} else {
+				panic("Invalid last id type")
 			}
 
+		retry:
 			// Prepare for retry with backoff
 			iter.Close()
 			time.Sleep(b.NextBackOff())

@@ -3,6 +3,7 @@ package oplog
 import (
 	"errors"
 	"strconv"
+	"time"
 
 	"gopkg.in/mgo.v2/bson"
 )
@@ -10,6 +11,8 @@ import (
 type LastId interface {
 	// String returns the string representation of their value
 	String() string
+	// Time returns the embedded time
+	Time() time.Time
 }
 
 type OperationLastId struct {
@@ -60,6 +63,10 @@ func NewLastId(id string) (LastId, error) {
 
 func (rid ReplicationLastId) String() string {
 	return strconv.FormatInt(rid.int64, 10)
+}
+
+func (rid ReplicationLastId) Time() time.Time {
+	return time.Unix(0, rid.int64*1000000)
 }
 
 func (oid OperationLastId) String() string {
