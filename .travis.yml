@@ -1,4 +1,29 @@
 language: go
+
 go:
-- 1.3
-- 1.4
+  - 1.4
+
+env:
+  global:
+    - COMMIT=${TRAVIS_COMMIT::8}
+    - secure: "BErU1CAVLd4b00zjH8BEZD5I4TfRIGLNtufSJl56U59duVo9m1fK7CyFwb3LEiNLPTeXIzYsG+pRH755Nrh/WGWrM2WjY/Olp7KmUk65AkrSeoO/CJpY73Al/wqqTY9ZjuP/1ywI2zhECTvWrpuZnOlUoGOsxaOpOYzftUJDkGk="
+    - secure: "bXgJIBBhR4VVdUPHFTxtlGREnVF/EhWjA2GUrBZSixy3gaz+M+K5xEigxXu2yFR3p/gKIpwnB6yaDY5rucW6CUImP61TXpj2fEJmFBTKCnJfHHMqK5bUs+IzZq0/+KeCQWHYLRM2xKRaZn0xxYbpj5/HG5JiX8tXcU9rqRUpdAE="
+    - secure: "C6HiNjWn8xkgfmf5txOFEOcZ2svWCEjbZQqWGx/wB5T2/7u8AWLt5JZas9ZH7HU1sVhJEsKIWkTPW9+odEATPr4ZUy2aWySvlOzw6061fTzQdrHw+WsWl5hxSLjNBurE8iRcdkitPPnI2+YJ7CBp2jWM77uLZFNnQQvEtZnBJi4="
+
+branches:
+  only:
+    - master
+    - prod
+
+services:
+  - docker
+
+after_success:
+  - CGO_ENABLED=0 go build -a -installsuffix cgo -o oplogd cmd/oplogd/main.go
+  - export REPO=pixelle/oplogd
+  - export TAG=`if [ "$TRAVIS_BRANCH" == "master" ]; then echo "latest"; else echo $TRAVIS_BRANCH ; fi`
+  - docker build -f Dockerfile.travis -t $REPO:$COMMIT .
+  - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
+  - docker tag $REPO:$COMMIT $REPO:$TAG
+  - docker tag $REPO:$COMMIT $REPO:travis-$TRAVIS_BUILD_NUMBER
+  - docker push $REPO
