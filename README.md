@@ -54,6 +54,12 @@ Available options:
 * `--object-url`: A URL template to reference objects. If this option is set, SSE events will have an "ref" field with the URL to the object. The URL should contain {{type}} and {{id}} variables (i.e.: http://api.mydomain.com/{{type}}/{{id}})
 * `--password`: Password protecting the global SSE stream.
 
+Available environment variables:
+
+* `OPLOGD_MONGO_URL`: See `--mongo-url`.
+* `OPLOGD_PASSWORD`: See `--password`
+* `OPLOGD_OBJECT_URL`: See `--object-url`
+
 ## UDP API
 
 To send operations to the agent, a UDP datagram containing a JSON object must be crafted and sent on the agent's UDP port (8042 by default).
