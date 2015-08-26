@@ -1,3 +1,4 @@
 package oplog
 
-var VERSION string = "1.1.5"
+// Version contains the current version of OpLog
+var Version = "1.1.5"

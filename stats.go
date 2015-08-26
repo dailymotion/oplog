@@ -25,8 +25,8 @@ type Stats struct {
 	Connections *expvar.Int
 }
 
-// NewStats create a new empty stats object
-func NewStats() Stats {
+// newStats create a new empty stats object
+func newStats() Stats {
 	return Stats{
 		Status:          "OK",
 		EventsReceived:  expvar.NewInt("events_received"),

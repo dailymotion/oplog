@@ -8,7 +8,7 @@ import (
 
 func TestFilterSingleType(t *testing.T) {
 	q := bson.M{}
-	f := OpLogFilter{Types: []string{"a"}}
+	f := Filter{Types: []string{"a"}}
 	f.apply(&q)
 	if q["data.t"] != "a" {
 		t.Fail()
@@ -17,7 +17,7 @@ func TestFilterSingleType(t *testing.T) {
 
 func TestFilterMultiTypes(t *testing.T) {
 	q := bson.M{}
-	f := OpLogFilter{Types: []string{"a", "b"}}
+	f := Filter{Types: []string{"a", "b"}}
 	f.apply(&q)
 	m, ok := q["data.t"].(bson.M)
 	if !ok {
@@ -34,7 +34,7 @@ func TestFilterMultiTypes(t *testing.T) {
 
 func TestFilterSingleParent(t *testing.T) {
 	q := bson.M{}
-	f := OpLogFilter{Parents: []string{"a"}}
+	f := Filter{Parents: []string{"a"}}
 	f.apply(&q)
 	if q["data.p"] != "a" {
 		t.Fail()
@@ -43,7 +43,7 @@ func TestFilterSingleParent(t *testing.T) {
 
 func TestFilterMultiParents(t *testing.T) {
 	q := bson.M{}
-	f := OpLogFilter{Parents: []string{"a", "b"}}
+	f := Filter{Parents: []string{"a", "b"}}
 	f.apply(&q)
 	m, ok := q["data.p"].(bson.M)
 	if !ok {

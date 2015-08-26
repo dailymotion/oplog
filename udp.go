@@ -9,11 +9,11 @@ import (
 	log "github.com/Sirupsen/logrus"
 )
 
-type UDPOperation struct {
+type udpOperation struct {
 	Event     string     `json:"event"`
 	Parents   []string   `json:"parents"`
 	Type      string     `json:"type"`
-	Id        string     `json:"id"`
+	ID        string     `json:"id"`
 	Timestamp *time.Time `json:"timestamp,omniempty"`
 }
 
@@ -23,6 +23,7 @@ type UDPDaemon struct {
 	ol   *OpLog
 }
 
+// NewUDPDaemon create a deamon listening for operations over UDP
 func NewUDPDaemon(addr string, ol *OpLog) *UDPDaemon {
 	return &UDPDaemon{addr, ol}
 }
@@ -45,7 +46,7 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 
 	daemon.ol.Stats.QueueMaxSize.Set(int64(queueMaxSize))
 	ops := make(chan *Operation, queueMaxSize)
-	go daemon.ol.Ingest(ops)
+	go daemon.ol.Ingest(ops, nil)
 
 	for {
 		buffer := make([]byte, 1024)
@@ -66,7 +67,7 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 			continue
 		}
 
-		operation := UDPOperation{}
+		operation := udpOperation{}
 		err = json.Unmarshal(buffer[:n], &operation)
 		if err != nil {
 			log.Warnf("UDP invalid JSON recieved: %s", err)
@@ -88,7 +89,7 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 				Timestamp: timestamp,
 				Parents:   operation.Parents,
 				Type:      strings.ToLower(operation.Type),
-				Id:        operation.Id,
+				ID:        operation.ID,
 			},
 		}
 		if err := op.Validate(); err != nil {

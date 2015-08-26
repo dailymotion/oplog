@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"expvar"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -26,6 +25,8 @@ type SSEDaemon struct {
 	HeartbeatTickerCount int8
 }
 
+// NewSSEDaemon creates a new HTTP server configured to serve oplog stream over HTTP
+// using Server Sent Event protocol.
 func NewSSEDaemon(addr string, ol *OpLog) *SSEDaemon {
 	daemon := &SSEDaemon{
 		ol:                   ol,
@@ -80,6 +81,7 @@ func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Status exposes expvar data
 func (daemon *SSEDaemon) Status(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, "{\"status\":\"OK\"")
@@ -89,6 +91,7 @@ func (daemon *SSEDaemon) Status(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "}")
 }
 
+// Ops exposes an SSE endpoint to stream operations
 func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	ip := xff.GetRemoteAddr(r)
 	log.Infof("SSE[%s] connection started", ip)
@@ -105,46 +108,46 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h := w.Header()
-	h.Set("Server", fmt.Sprintf("oplog/%s", VERSION))
+	h.Set("Server", fmt.Sprintf("oplog/%s", Version))
 	h.Set("Content-Type", "text/event-stream; charset=utf-8")
 	h.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	h.Set("Connection", "close")
 	h.Set("Access-Control-Allow-Origin", "*")
 
-	var lastId LastId
+	var lastID LastID
 	var err error
 	if r.Header.Get("Last-Event-ID") == "" {
 		// No last id provided, use the very last id of the events collection
-		lastId, err = daemon.ol.LastId()
+		lastID, err = daemon.ol.LastID()
 		if err != nil {
 			log.Warnf("SSE[%s] can't get last id: %s", ip, err)
 			w.WriteHeader(503)
 			return
 		}
 	} else {
-		if lastId, err = NewLastId(r.Header.Get("Last-Event-ID")); err != nil {
+		if lastID, err = NewLastID(r.Header.Get("Last-Event-ID")); err != nil {
 			log.Warnf("SSE[%s] invalid last id: %s", ip, err)
 			w.WriteHeader(400)
 			return
 		}
-		found, err := daemon.ol.HasId(lastId)
+		found, err := daemon.ol.HasID(lastID)
 		if err != nil {
 			log.Warnf("SSE[%s] can't check last id: %s", ip, err)
 			w.WriteHeader(503)
 			return
 		}
 		if !found {
-			log.Debugf("SSE[%s] last id not found, falling back to replication id: %s", ip, lastId.String())
+			log.Debugf("SSE[%s] last id not found, falling back to replication id: %s", ip, lastID.String())
 			// If the requested event id is not found, fallback to a replication id
-			olid := lastId.(*OperationLastId)
-			lastId = olid.Fallback()
+			olid := lastID.(*OperationLastID)
+			lastID = olid.Fallback()
 		}
 		// Backward compat, remove when all oplogc will be updated
 		h.Set("Last-Event-ID", r.Header.Get("Last-Event-ID"))
 	}
 
-	if lastId != nil {
-		log.Debugf("SSE[%s] using last id: %s", ip, lastId.String())
+	if lastID != nil {
+		log.Debugf("SSE[%s] using last id: %s", ip, lastID.String())
 	}
 
 	types := []string{}
@@ -155,18 +158,18 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("parents") != "" {
 		parents = strings.Split(r.URL.Query().Get("parents"), ",")
 	}
-	filter := OpLogFilter{
+	filter := Filter{
 		Types:   types,
 		Parents: parents,
 	}
 
 	flusher := w.(http.Flusher)
 	notifier := w.(http.CloseNotifier)
-	ops := make(chan io.WriterTo)
+	ops := make(chan GenericEvent)
 	stop := make(chan bool)
 	flusher.Flush()
 
-	go daemon.ol.Tail(lastId, filter, ops, stop)
+	go daemon.ol.Tail(lastID, filter, ops, stop)
 	defer func() {
 		// Stop the oplog tailer
 		stop <- true
@@ -217,6 +220,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Run starts the SSE server
 func (daemon *SSEDaemon) Run() error {
 	return daemon.s.ListenAndServe()
 }

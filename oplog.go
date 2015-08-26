@@ -1,12 +1,14 @@
-// Package oplog provides a generic oplog/replication system for REST APIs.
+// Package oplog provides a generic oplog/replication system for micro-services.
 //
 // Most of the time, the oplog service is used thru the oplogd agent which uses this
 // package. But in the case your application is written in Go, you may want to integrate
 // at the code level.
+//
+// You can find more information on the oplog service here: https://github.com/dailymotion/oplog
 package oplog
 
 import (
-	"io"
+	"fmt"
 	"sync"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// OpLog allows to store and stream events to/from a Mongo database
 type OpLog struct {
 	s     *mgo.Session
 	Stats *Stats
@@ -23,11 +26,11 @@ type OpLog struct {
 	// The URL can use {{type}} and {{id}} template as follow: http://api.mydomain.com/{{type}}/{{id}}.
 	// If not provided, no "ref" field will be included in oplog events.
 	ObjectURL string
-	// Number of object to fetch from the states collection per page.
+	// Number of object to fetch from the states collection on each iteration.
+	// Too large pages may create lock contention on MongoDB, too small may slow
+	// down the iteration.
 	PageSize int
 }
-
-type OperationDataMap map[string]OperationData
 
 // New returns an OpLog connected to the given provided mongo URL.
 // If the capped collection does not exists, it will be created with the max
@@ -40,10 +43,10 @@ func New(mongoURL string, maxBytes int) (*OpLog, error) {
 	session.SetSyncTimeout(10 * time.Second)
 	session.SetSocketTimeout(20 * time.Second)
 	session.SetSafe(&mgo.Safe{})
-	stats := NewStats()
+	sts := newStats()
 	oplog := &OpLog{
 		s:        session,
-		Stats:    &stats,
+		Stats:    &sts,
 		PageSize: 1000,
 	}
 	oplog.init(maxBytes)
@@ -52,8 +55,8 @@ func New(mongoURL string, maxBytes int) (*OpLog, error) {
 	return oplog, nil
 }
 
-// DB returns the Mongo database object used by the oplog
-func (oplog *OpLog) DB() *mgo.Database {
+// db returns the Mongo database object used by the oplog
+func (oplog *OpLog) db() *mgo.Database {
 	return oplog.s.Copy().DB("")
 }
 
@@ -103,25 +106,28 @@ func (oplog *OpLog) init(maxBytes int) {
 }
 
 // Ingest appends an operation into the OpLog thru a channel
-func (oplog *OpLog) Ingest(ops <-chan *Operation) {
-	db := oplog.DB()
+func (oplog *OpLog) Ingest(ops <-chan *Operation, done <-chan bool) {
+	db := oplog.db()
 	defer db.Session.Close()
 	for {
 		select {
 		case op := <-ops:
 			oplog.Stats.QueueSize.Set(int64(len(ops)))
-			oplog.Append(op, db)
+			oplog.append(op, db)
+		case <-done:
+			return
 		}
 	}
 }
 
 // Append appends an operation into the OpLog
-//
-// If the db parameter is not nil, the passed db connection is used. In case of
-// error, the db pointer may be replaced by a new alive session.
-func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
+func (oplog *OpLog) Append(op *Operation) {
+	oplog.append(op, nil)
+}
+
+func (oplog *OpLog) append(op *Operation, db *mgo.Database) {
 	if db == nil {
-		db = oplog.DB()
+		db = oplog.db()
 		defer db.Session.Close()
 	}
 	log.Debugf("OPLOG ingest operation: %#v", op.Info())
@@ -145,15 +151,15 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 		// only the final stat of the object is stored.
 		event = "insert"
 	}
-	o := ObjectState{
-		Id:        op.Data.GetId(),
+	o := objectState{
+		ID:        op.Data.GetID(),
 		Event:     event,
 		Timestamp: time.Now(),
 		Data:      op.Data,
 	}
 	b.Reset()
 	for {
-		if _, err := db.C("oplog_states").Upsert(bson.M{"_id": o.Id}, o); err != nil {
+		if _, err := db.C("oplog_states").Upsert(bson.M{"_id": o.ID}, o); err != nil {
 			log.Warnf("OPLOG can't upsert object, retrying: %s", err)
 			// Retry with backoff
 			time.Sleep(b.NextBackOff())
@@ -173,8 +179,8 @@ func (oplog *OpLog) Append(op *Operation, db *mgo.Database) {
 // with objects that are present in the oplog database but not in the source database.
 // If an object is present in both createMap and the oplog database but timestamp of the
 // oplog object is earlier than createMap's, the object is added to the updateMap.
-func (oplog *OpLog) Diff(createMap OperationDataMap, updateMap OperationDataMap, deleteMap OperationDataMap) error {
-	db := oplog.DB()
+func (oplog *OpLog) Diff(createMap map[string]OperationData, updateMap map[string]OperationData, deleteMap map[string]OperationData) error {
+	db := oplog.db()
 	defer db.Session.Close()
 
 	// Find the most recent timestamp
@@ -185,25 +191,25 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, updateMap OperationDataMap,
 		}
 	}
 
-	obs := ObjectState{}
+	obs := objectState{}
 	iter := db.C("oplog_states").Find(bson.M{}).Iter()
 	for iter.Next(&obs) {
 		if obs.Event == "deleted" {
-			if obd, ok := createMap[obs.Id]; ok {
+			if obd, ok := createMap[obs.ID]; ok {
 				// If the object is present in the dump but deleted in the oplog, it means
 				// that it has been deleted between the dump creation and the sync
 				// (if the oplog version is more recent)
 				if obd.Timestamp.Before(obs.Data.Timestamp) {
-					delete(createMap, obs.Id)
+					delete(createMap, obs.ID)
 				}
 			}
 		} else {
-			if obd, ok := createMap[obs.Id]; ok {
+			if obd, ok := createMap[obs.ID]; ok {
 				// Object exists on both sides, remove it from the create map
-				delete(createMap, obs.Id)
+				delete(createMap, obs.ID)
 				// If the dump object is newer than oplog's, add it to the update map
 				if obs.Data.Timestamp.Before(obd.Timestamp) {
-					updateMap[obs.Id] = obd
+					updateMap[obs.ID] = obd
 				}
 			} else {
 				// The object only exists in the oplog db, add it to the delete map
@@ -211,8 +217,8 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, updateMap OperationDataMap,
 				// in the dump in order to ensure we don't delete an object which
 				// have been created between the dump creation and the sync.
 				if obs.Data.Timestamp.Before(dumpTime) {
-					deleteMap[obs.Id] = *obs.Data
-					delete(createMap, obs.Id)
+					deleteMap[obs.ID] = *obs.Data
+					delete(createMap, obs.ID)
 				}
 			}
 		}
@@ -224,10 +230,10 @@ func (oplog *OpLog) Diff(createMap OperationDataMap, updateMap OperationDataMap,
 	return nil
 }
 
-// HasId checks if an operation id is present in the capped collection.
-func (oplog *OpLog) HasId(id LastId) (bool, error) {
-	if olid, ok := id.(*OperationLastId); ok {
-		db := oplog.DB()
+// HasID checks if an operation id is present in the capped collection.
+func (oplog *OpLog) HasID(id LastID) (bool, error) {
+	if olid, ok := id.(*OperationLastID); ok {
+		db := oplog.db()
 		defer db.Session.Close()
 		count, err := db.C("oplog_ops").FindId(olid.ObjectId).Count()
 		return count != 0, err
@@ -237,44 +243,44 @@ func (oplog *OpLog) HasId(id LastId) (bool, error) {
 	return true, nil
 }
 
-// LastId returns the most recently inserted operation id if any or nil if oplog is empty
-func (oplog *OpLog) LastId() (LastId, error) {
-	db := oplog.DB()
+// LastID returns the most recently inserted operation id if any or nil if oplog is empty
+func (oplog *OpLog) LastID() (LastID, error) {
+	db := oplog.db()
 	defer db.Session.Close()
 	operation := &Operation{}
 	err := db.C("oplog_ops").Find(nil).Sort("-$natural").One(operation)
 	if err == mgo.ErrNotFound {
 		return nil, nil
 	}
-	if operation.Id != nil {
-		return &OperationLastId{operation.Id}, nil
+	if operation.ID != nil {
+		return &OperationLastID{operation.ID}, nil
 	}
 	return nil, err
 }
 
 // Tail tails all the new operations in the oplog and send the operation in
-// the given channel. If the lastId parameter is given, all operation posted after
+// the given channel. If the lastID parameter is given, all operation posted after
 // this event will be returned.
 //
-// If the lastId is a ReplicationLastId (unix timestamp in milliseconds), the tailing will
+// If the lastID is a ReplicationLastID (unix timestamp in milliseconds), the tailing will
 // start by replicating all the objects last updated after the timestamp.
 //
-// Giving a lastId of 0 mean replicating all the stored objects before tailing the live updates.
+// Giving a lastID of 0 mean replicating all the stored objects before tailing the live updates.
 //
 // The filter argument can be used to filter on some type of objects or objects with given parrents.
 //
 // The create, update, delete events are streamed back to the sender thru the out channel
-func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.WriterTo, stop <-chan bool) {
+func (oplog *OpLog) Tail(lastID LastID, filter Filter, out chan<- GenericEvent, stop <-chan bool) {
 	var lastEv GenericEvent
 
-	if lastId != nil {
-		if r, ok := lastId.(*ReplicationLastId); ok && r.int64 == 0 {
+	if lastID != nil {
+		if r, ok := lastID.(*ReplicationLastID); ok && r.int64 == 0 {
 			// When full replication is requested, start by sending a "reset" event to instruct
 			// the consumer to reset its database before processing further operations.
 			// The id is 1 so if connection is lost after this event and consumer processed the event,
 			// the connection recover won't trigger a second "reset" event.
-			out <- &OpLogEvent{
-				Id:    "1",
+			out <- &Event{
+				ID:    "1",
 				Event: "reset",
 			}
 		}
@@ -294,7 +300,7 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 	go func() {
 		defer wg.Done()
 
-		db := oplog.DB()
+		db := oplog.db()
 		defer db.Session.Close()
 
 		var iter *mgo.Iter
@@ -308,12 +314,12 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 		b.MaxElapsedTime = 0 // Retry forever
 		b.Reset()
 
-		var replicationFallbackId LastId
+		var replicationFallbackID LastID
 
 		for {
 			var err error
 
-			if i, ok := lastId.(*OperationLastId); ok {
+			if i, ok := lastID.(*OperationLastID); ok || i == nil {
 				log.Debug("OPLOG start live updates")
 
 				query := bson.M{}
@@ -352,7 +358,7 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 
 				if iter.Err() != nil {
 					log.Warnf("OPLOG tail failed with error, try to reconnect: %s", iter.Err())
-				} else if operation.Id == nil {
+				} else if operation.ID == nil {
 					// This mostly happen when the tail cursor is on an empty collection
 					log.Debug("OPLOG ops collection is empty, retrying")
 					time.Sleep(b.NextBackOff())
@@ -361,13 +367,13 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 					// Reset the backoff counter
 					b.Reset()
 				}
-			} else if i, ok := lastId.(*ReplicationLastId); ok {
+			} else if i, ok := lastID.(*ReplicationLastID); ok {
 				log.Debug("OPLOG start replication")
 
 				// Capture the current oplog position in order to resume at this position
 				// once replication or fallback is done. This also serves a upper limit for
 				// the fetching of the data.
-				if replicationFallbackId, err = oplog.LastId(); err != nil {
+				if replicationFallbackID, err = oplog.LastID(); err != nil {
 					log.Warnf("OPLOG error retriving replication fallback id: %s", err)
 					goto retry
 				}
@@ -380,9 +386,9 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 					// Id is a timestamp, timestamp are always valid
 					tsClause["$gte"] = i.Time()
 				}
-				if replicationFallbackId != nil {
+				if replicationFallbackID != nil {
 					// Do not fetch any new object modified after the current most recent operation
-					tsClause["$lte"] = replicationFallbackId.Time()
+					tsClause["$lte"] = replicationFallbackID.Time()
 				}
 				if !i.fallbackMode {
 					// In replication mode, do only notify about inserts
@@ -397,7 +403,7 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 					iter = db.C("oplog_states").Find(query).Sort("ts").Limit(oplog.PageSize).Iter()
 
 					c := 0
-					object := ObjectState{}
+					object := objectState{}
 					for iter.Next(&object) {
 						if isDone() {
 							return
@@ -422,7 +428,7 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 
 					if lastEv != nil && c == oplog.PageSize {
 						// We consumed on page of event, go to the next page
-						tsClause["$gte"] = lastEv.GetEventId().Time()
+						tsClause["$gte"] = lastEv.GetEventID().Time()
 						continue
 					}
 
@@ -437,23 +443,24 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 				// We use the last event id here in order to ensure the consumer will resume
 				// the replication starting at this point in time in case of a failure after
 				// the "live" event.
-				liveId := "" // default value
+				liveID := "" // default value
 				if lastEv != nil {
-					liveId = lastEv.GetEventId().String()
+					liveID = lastEv.GetEventID().String()
 				}
-				out <- &OpLogEvent{
-					Id:    liveId,
+				out <- &Event{
+					ID:    liveID,
 					Event: "live",
 				}
 				// Switch to live update at the last operation id inserted before the replication
 				// was started
-				lastId = replicationFallbackId
-				replicationFallbackId = nil
+				lastID = replicationFallbackID
+				replicationFallbackID = nil
 				lastEv = nil
 
 				// Reset the backoff counter
 				b.Reset()
 			} else {
+				fmt.Printf("%#v", lastID)
 				panic("Invalid last id type")
 			}
 
@@ -463,7 +470,7 @@ func (oplog *OpLog) Tail(lastId LastId, filter OpLogFilter, out chan<- io.Writer
 			time.Sleep(b.NextBackOff())
 			db.Session.Refresh()
 			if lastEv != nil {
-				lastId = lastEv.GetEventId()
+				lastID = lastEv.GetEventID()
 			}
 		}
 	}()

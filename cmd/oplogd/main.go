@@ -29,7 +29,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Println(oplog.VERSION)
+		fmt.Println(oplog.Version)
 		return
 	}
 
@@ -37,7 +37,7 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	log.Infof("Starting oplog %s", oplog.VERSION)
+	log.Infof("Starting oplog %s", oplog.Version)
 
 	ol, err := oplog.New(*mongoURL, *cappedCollectionSize)
 	if err != nil {

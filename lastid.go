@@ -8,25 +8,28 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-type LastId interface {
+// LastID defines an interface for different kinds of oplog id representations
+type LastID interface {
 	// String returns the string representation of their value
 	String() string
 	// Time returns the embedded time
 	Time() time.Time
 }
 
-type OperationLastId struct {
+// OperationLastID represents an actual stored operation id
+type OperationLastID struct {
 	*bson.ObjectId
 }
 
-type ReplicationLastId struct {
+// ReplicationLastID represents a timestamp id allowing to hook into operation feed by time
+type ReplicationLastID struct {
 	int64
 	fallbackMode bool
 }
 
-// parseObjectId returns a bson.ObjectId from an hex representation of an object id or nil
+// parseObjectID returns a bson.ObjectId from an hex representation of an object id or nil
 // if an empty string is passed or if the format of the id wasn't valid
-func parseObjectId(id string) *bson.ObjectId {
+func parseObjectID(id string) *bson.ObjectId {
 	if id != "" && bson.IsObjectIdHex(id) {
 		oid := bson.ObjectIdHex(id)
 		return &oid
@@ -34,9 +37,9 @@ func parseObjectId(id string) *bson.ObjectId {
 	return nil
 }
 
-// parseTimestampId try to find a millisecond timestamp in the string and return it or return
+// parseTimestampID try to find a millisecond timestamp in the string and return it or return
 // false as second value if can be parsed
-func parseTimestampId(id string) (ts int64, ok bool) {
+func parseTimestampID(id string) (ts int64, ok bool) {
 	ts = -1
 	ok = false
 	if len(id) <= 13 {
@@ -48,34 +51,37 @@ func parseTimestampId(id string) (ts int64, ok bool) {
 	return
 }
 
-func NewLastId(id string) (LastId, error) {
-	if ts, ok := parseTimestampId(id); ok {
+// NewLastID creates a last id from a string containing either a operation id
+// or a replication id.
+func NewLastID(id string) (LastID, error) {
+	if ts, ok := parseTimestampID(id); ok {
 		// Id is a timestamp, timestamp are always valid
-		return &ReplicationLastId{ts, false}, nil
+		return &ReplicationLastID{ts, false}, nil
 	}
 
-	oid := parseObjectId(id)
+	oid := parseObjectID(id)
 	if oid == nil {
 		return nil, errors.New("Invalid last id")
 	}
-	return &OperationLastId{oid}, nil
+	return &OperationLastID{oid}, nil
 }
 
-func (rid ReplicationLastId) String() string {
+func (rid ReplicationLastID) String() string {
 	return strconv.FormatInt(rid.int64, 10)
 }
 
-func (rid ReplicationLastId) Time() time.Time {
+// Time extract the time from the replication id
+func (rid ReplicationLastID) Time() time.Time {
 	return time.Unix(0, rid.int64*1000000)
 }
 
-func (oid OperationLastId) String() string {
+func (oid OperationLastID) String() string {
 	return oid.ObjectId.Hex()
 }
 
 // Fallback tries to convert a "event" id into a "replication" id by extracting
 // the timestamp part of the Mongo ObjectId. If the id is not a valid ObjectId,
 // an error is returned.
-func (oid *OperationLastId) Fallback() LastId {
-	return &ReplicationLastId{oid.Time().UnixNano() / 1000000, true}
+func (oid *OperationLastID) Fallback() LastID {
+	return &ReplicationLastID{oid.Time().UnixNano() / 1000000, true}
 }

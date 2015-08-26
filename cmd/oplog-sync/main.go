@@ -63,9 +63,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	createMap := make(oplog.OperationDataMap)
-	updateMap := make(oplog.OperationDataMap)
-	deleteMap := make(oplog.OperationDataMap)
+	createMap := make(map[string]oplog.OperationData)
+	updateMap := make(map[string]oplog.OperationData)
+	deleteMap := make(map[string]oplog.OperationData)
 
 	var fh *os.File
 	if file == "-" {
@@ -90,7 +90,7 @@ func main() {
 		if err := obd.Validate(); err != nil {
 			log.Fatalf("SYNC invalid operation at line %d: %s", line, err)
 		}
-		createMap[obd.GetId()] = obd
+		createMap[obd.GetID()] = obd
 	}
 	if err := scanner.Err(); err != nil {
 		log.Fatalf("SYNC dump reading error: %s", err)
@@ -116,13 +116,14 @@ func main() {
 
 	// Generate events to fix the delta
 	log.Debugf("SYNC sending the delta events")
-	db := ol.DB()
-	defer db.Session.Close()
+	ops := make(chan *oplog.Operation)
+	done := make(chan bool, 1)
+	go ol.Ingest(ops, nil)
 	op := &oplog.Operation{Event: "create"}
-	genEvents := func(opMap oplog.OperationDataMap) {
+	genEvents := func(opMap map[string]oplog.OperationData) {
 		for _, obd := range opMap {
 			op.Data = &obd
-			ol.Append(op, db)
+			ops <- op
 		}
 	}
 	log.Debugf("SYNC generating %d create events", totalCreate)
@@ -134,5 +135,6 @@ func main() {
 	op.Event = "delete"
 	genEvents(deleteMap)
 
+	done <- true
 	log.Debugf("SYNC done")
 }

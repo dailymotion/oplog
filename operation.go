@@ -14,7 +14,7 @@ import (
 
 // Operation represents an operation stored in the OpLog, ready to be exposed as SSE.
 type Operation struct {
-	Id    *bson.ObjectId `bson:"_id,omitempty"`
+	ID    *bson.ObjectId `bson:"_id,omitempty"`
 	Event string         `bson:"event"`
 	Data  *OperationData `bson:"data"`
 }
@@ -24,23 +24,16 @@ type OperationData struct {
 	Timestamp time.Time `bson:"ts" json:"timestamp"`
 	Parents   []string  `bson:"p" json:"parents"`
 	Type      string    `bson:"t" json:"type"`
-	Id        string    `bson:"id" json:"id"`
+	ID        string    `bson:"id" json:"id"`
 	Ref       string    `bson:"-,omitempty" json:"ref,omitempty"`
 }
 
-// ObjectState is the current state of an object given the most recent operation applied on it
-type ObjectState struct {
-	Id        string         `bson:"_id,omitempty" json:"id"`
-	Event     string         `bson:"event"`
-	Timestamp time.Time      `bson:"ts"`
-	Data      *OperationData `bson:"data"`
+// GetEventID returns an SSE last event id for the operation
+func (op Operation) GetEventID() LastID {
+	return &OperationLastID{op.ID}
 }
 
-// GetEventId returns an SSE last event id for the operation
-func (op Operation) GetEventId() LastId {
-	return &OperationLastId{op.Id}
-}
-
+// Validate ensures an operation has the proper syntax
 func (op Operation) Validate() error {
 	switch op.Event {
 	case "insert", "update", "delete":
@@ -56,32 +49,17 @@ func (op Operation) WriteTo(w io.Writer) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", op.Id.Hex(), op.Event, data)
+	n, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", op.ID.Hex(), op.Event, data)
 	return int64(n), err
 }
 
 // Info returns a human readable version of the operation
 func (op *Operation) Info() string {
 	id := "(new)"
-	if op.Id != nil {
-		id = op.Id.Hex()
+	if op.ID != nil {
+		id = op.ID.Hex()
 	}
-	return fmt.Sprintf("%s:%s(%s:%s)", id, op.Event, op.Data.Type, op.Data.Id)
-}
-
-// GetEventId returns an SSE last event id for the object state
-func (obj ObjectState) GetEventId() LastId {
-	return &ReplicationLastId{obj.Timestamp.UnixNano() / 1000000, false}
-}
-
-// WriteTo serializes an ObjectState as a SSE compatible message
-func (obj ObjectState) WriteTo(w io.Writer) (int64, error) {
-	data, err := json.Marshal(obj.Data)
-	if err != nil {
-		return 0, err
-	}
-	n, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", obj.Timestamp.UnixNano()/1000000, obj.Event, data)
-	return int64(n), err
+	return fmt.Sprintf("%s:%s(%s:%s)", id, op.Event, op.Data.Type, op.Data.ID)
 }
 
 // genRef generates the reference URL (Ref field) from the given object URL template based on
@@ -92,20 +70,22 @@ func (obd *OperationData) genRef(objectURL string) {
 		return
 	}
 
-	r := strings.NewReplacer("{{type}}", obd.Type, "{{id}}", obd.Id)
+	r := strings.NewReplacer("{{type}}", obd.Type, "{{id}}", obd.ID)
 	obd.Ref = r.Replace(objectURL)
 }
 
-func (obd OperationData) GetId() string {
+// GetID returns the operation id
+func (obd OperationData) GetID() string {
 	b := bytes.Buffer{}
 	b.WriteString(obd.Type)
 	b.WriteString("/")
-	b.WriteString(obd.Id)
+	b.WriteString(obd.ID)
 	return b.String()
 }
 
+// Validate ensures an operation data has the right syntax
 func (obd OperationData) Validate() error {
-	if obd.Id == "" {
+	if obd.ID == "" {
 		return errors.New("missing id field")
 	}
 	if obd.Type == "" {

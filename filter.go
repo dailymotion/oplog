@@ -2,13 +2,14 @@ package oplog
 
 import "gopkg.in/mgo.v2/bson"
 
-type OpLogFilter struct {
+// Filter contains filter query
+type Filter struct {
 	Types   []string
 	Parents []string
 }
 
 // Apply applies the filters to the given query
-func (f OpLogFilter) apply(query *bson.M) {
+func (f Filter) apply(query *bson.M) {
 	switch len(f.Types) {
 	case 0:
 		// Do nothing

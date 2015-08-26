@@ -15,7 +15,7 @@ func (wt *writeChecker) Write(b []byte) (int, error) {
 }
 
 func TestOplogEventOutput(t *testing.T) {
-	e := OpLogEvent{"a", "b"}
+	e := Event{"a", "b"}
 	w := &writeChecker{}
 	n, err := e.WriteTo(w)
 	if err != nil {
@@ -33,8 +33,8 @@ func TestOplogEventOutput(t *testing.T) {
 }
 
 func TestOplogEventId(t *testing.T) {
-	e := OpLogEvent{"a", "b"}
-	if e.GetEventId().String() != "a" {
+	e := Event{"a", "b"}
+	if e.GetEventID().String() != "a" {
 		t.FailNow()
 	}
 }

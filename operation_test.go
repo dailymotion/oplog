@@ -8,7 +8,7 @@ func TestOperationValidate(t *testing.T) {
 	op := Operation{
 		Event: "insert",
 		Data: &OperationData{
-			Id:   "id",
+			ID:   "id",
 			Type: "type",
 		},
 	}
@@ -29,7 +29,7 @@ func TestOperationValidateInvalidEventName(t *testing.T) {
 	op := Operation{
 		Event: "invalid",
 		Data: &OperationData{
-			Id:   "id",
+			ID:   "id",
 			Type: "type",
 		},
 	}
@@ -42,7 +42,7 @@ func TestOperationValidateInvalidEventName(t *testing.T) {
 
 func TestOperationDataValidate(t *testing.T) {
 	opd := OperationData{
-		Id:      "id",
+		ID:      "id",
 		Type:    "type",
 		Parents: []string{"parent/id"},
 	}
@@ -53,7 +53,7 @@ func TestOperationDataValidate(t *testing.T) {
 
 func TestOperationDataValidateEmptyId(t *testing.T) {
 	opd := OperationData{
-		Id:   "",
+		ID:   "",
 		Type: "type",
 	}
 	if err := opd.Validate(); err == nil {
@@ -63,7 +63,7 @@ func TestOperationDataValidateEmptyId(t *testing.T) {
 
 func TestOperationDataValidateEmptyType(t *testing.T) {
 	opd := OperationData{
-		Id:   "id",
+		ID:   "id",
 		Type: "",
 	}
 	if err := opd.Validate(); err == nil {
@@ -73,7 +73,7 @@ func TestOperationDataValidateEmptyType(t *testing.T) {
 
 func TestOperationDataValidateEmptyParentItem(t *testing.T) {
 	opd := OperationData{
-		Id:      "id",
+		ID:      "id",
 		Type:    "type",
 		Parents: []string{""},
 	}
