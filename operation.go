@@ -28,6 +28,25 @@ type OperationData struct {
 	Ref       string    `bson:"-,omitempty" json:"ref,omitempty"`
 }
 
+// NewOperation creates an new operation from given information.
+//
+// The event argument can be one of "insert", "update" or "delete". The time
+// defines the exact modification date of the object (must be the exact same time
+// as stored in the database).
+func NewOperation(event string, time time.Time, objID, objType string, objParents []string) *Operation {
+	id := bson.NewObjectId()
+	return &Operation{
+		ID:    &id,
+		Event: event,
+		Data: &OperationData{
+			Timestamp: time,
+			ID:        objID,
+			Type:      objType,
+			Parents:   objParents,
+		},
+	}
+}
+
 // GetEventID returns an SSE last event id for the operation
 func (op Operation) GetEventID() LastID {
 	return &OperationLastID{op.ID}
