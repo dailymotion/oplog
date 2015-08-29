@@ -1,21 +1,10 @@
 package oplog
 
 import (
-	"encoding/json"
 	"net"
-	"strings"
-	"time"
 
 	log "github.com/Sirupsen/logrus"
 )
-
-type udpOperation struct {
-	Event     string     `json:"event"`
-	Parents   []string   `json:"parents"`
-	Type      string     `json:"type"`
-	ID        string     `json:"id"`
-	Timestamp *time.Time `json:"timestamp,omniempty"`
-}
 
 // UDPDaemon listens for events and send them to the oplog MongoDB capped collection
 type UDPDaemon struct {
@@ -67,38 +56,14 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 			continue
 		}
 
-		operation := udpOperation{}
-		err = json.Unmarshal(buffer[:n], &operation)
+		op, err := ingestOperation(buffer[:n])
 		if err != nil {
-			log.Warnf("UDP invalid JSON recieved: %s", err)
-			daemon.ol.Stats.EventsError.Add(1)
-			continue
-		}
-
-		// The timestamp field is optional
-		var timestamp time.Time
-		if operation.Timestamp != nil {
-			timestamp = *operation.Timestamp
-		} else {
-			timestamp = time.Now()
-		}
-
-		op := Operation{
-			Event: strings.ToLower(operation.Event),
-			Data: &OperationData{
-				Timestamp: timestamp,
-				Parents:   operation.Parents,
-				Type:      strings.ToLower(operation.Type),
-				ID:        operation.ID,
-			},
-		}
-		if err := op.Validate(); err != nil {
-			log.Warnf("UDP invalid operation: %s", err)
+			log.Warnf("UDP invalid operation received: %s", err)
 			daemon.ol.Stats.EventsError.Add(1)
 			continue
 		}
 
 		daemon.ol.Stats.EventsReceived.Add(1)
-		ops <- &op
+		ops <- op
 	}
 }
