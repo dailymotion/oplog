@@ -117,7 +117,6 @@ func (daemon *SSEDaemon) PostOps(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Server", fmt.Sprintf("oplog/%s", Version))
 	h.Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	h.Set("Connection", "close")
 	h.Set("Access-Control-Allow-Origin", "*")
 
 	body, err := ioutil.ReadAll(r.Body)
@@ -128,7 +127,7 @@ func (daemon *SSEDaemon) PostOps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	op, err := ingestOperation(body)
+	op, err := decodeOperation(body)
 	if err != nil {
 		log.Warnf("HTTP ingest invalid operation received: %s", err)
 		daemon.ol.Stats.EventsError.Add(1)

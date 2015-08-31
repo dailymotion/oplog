@@ -56,7 +56,7 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 			continue
 		}
 
-		op, err := ingestOperation(buffer[:n])
+		op, err := decodeOperation(buffer[:n])
 		if err != nil {
 			log.Warnf("UDP invalid operation received: %s", err)
 			daemon.ol.Stats.EventsError.Add(1)

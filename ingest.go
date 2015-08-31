@@ -16,7 +16,7 @@ type inOperation struct {
 }
 
 // ingestOperation parses JSON data and returns an Operation on success.
-func ingestOperation(data []byte) (*Operation, error) {
+func decodeOperation(data []byte) (*Operation, error) {
 	operation := inOperation{}
 	err := json.Unmarshal(data, &operation)
 	if err != nil {
