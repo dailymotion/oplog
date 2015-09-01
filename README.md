@@ -62,11 +62,15 @@ Available environment variables:
 * `OPLOGD_INGEST_PASSWORD`: See `--ingest-password`
 * `OPLOGD_OBJECT_URL`: See `--object-url`
 
-## UDP API
+## Producer API: UDP and HTTP
 
-To send operations to the agent, a UDP datagram containing a JSON object must be crafted and sent on the agent's UDP port (8042 by default).
+To send operations to the agent you can either send a UDP datagram or a HTTP POST request containing a JSON object.
 
-The format of the message is as follow:
+The default port for both protocol is 8042.
+
+The HTTP request must be a POST on `/` with `application/json` as `Content-Type`.
+
+The format of the JSON object is as follow:
 
 ```javascript
 {
@@ -80,15 +84,17 @@ The format of the message is as follow:
 The following keys are required:
 
 * `event`: The type of event. Can be `insert`, `update` or `delete`.
-* `parents`: The list of parent objects of the modified object. The advised format for items of this list is `type/id` but any format is acceptable. It is generally a good idea to put a reference to the modified object itself in this list in order to easily let the consumers filter on any updates performed on the object.
 * `type`: The object type (i.e.: `video`, `user`, `playlist`, …)
 * `id`: The object id of the impacted object as string.
 
-The `timestamp` field is optional. It must contains the date when the object has been updated as RFC 3339 representation. If not provided, the time when the operation has been received by the agent is used instead.
+The following keys are optional:
+
+* `parents`: The list of parent objects of the modified object. The advised format for items of this list is `type/id` but any format is acceptable. It is generally a good idea to put a reference to the modified object itself in this list in order to easily let the consumers filter on any updates performed on the object.
+* `timestamp`: It must contains the date when the object has been updated as RFC 3339 representation. If not provided, the time when the operation has been received by the agent is used instead.
 
 See `examples/` directory for implementation examples in different languages.
 
-## Server Sent Event API
+## Consumer API: Server Sent Event
 
 The [SSE](http://dev.w3.org/html5/eventsource/) API runs on the same port as UDP API but using TCP. It means that agents have both input and output roles so it is easy to scale the service by putting an agent on every node of the source API cluster and expose their HTTP port via the same load balancer as the API while each node can send their updates to the UDP port on their localhost.
 
