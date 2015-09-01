@@ -15,7 +15,7 @@ type inOperation struct {
 	Timestamp *time.Time `json:"timestamp,omniempty"`
 }
 
-// ingestOperation parses JSON data and returns an Operation on success.
+// decodeOperation parses JSON data and returns an Operation on success.
 func decodeOperation(data []byte) (*Operation, error) {
 	operation := inOperation{}
 	err := json.Unmarshal(data, &operation)
