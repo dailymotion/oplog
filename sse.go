@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"expvar"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
@@ -18,6 +19,8 @@ type SSEDaemon struct {
 	ol *OpLog
 	// Password is the shared secret to connect to a password protected oplog.
 	Password string
+	// IngestPassword is the shared secret to connect to the HTTP ingest endpoint.
+	IngestPassword string
 	// FlushInterval defines the interval between flushes of the HTTP socket.
 	FlushInterval time.Duration
 	// HeartbeatTickerCount defines the number of FlushInterval with nothing to flush
@@ -43,9 +46,9 @@ func NewSSEDaemon(addr string, ol *OpLog) *SSEDaemon {
 	return daemon
 }
 
-// authenticate checks for HTTP basic authentication if an admin password is set.
-func (daemon *SSEDaemon) authenticate(r *http.Request) bool {
-	if daemon.Password == "" {
+// checkPassword checks HTTP basic authentication's password.
+func checkPassword(r *http.Request, password string) bool {
+	if password == "" {
 		return true
 	}
 
@@ -63,19 +66,27 @@ func (daemon *SSEDaemon) authenticate(r *http.Request) bool {
 		return false
 	}
 
-	return daemon.Password == pair[1]
+	return password == pair[1]
 }
 
 func (daemon *SSEDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		w.WriteHeader(405)
-		return
-	}
 	switch r.URL.Path {
 	case "/status":
-		daemon.Status(w, r)
+		if r.Method == "GET" {
+			daemon.Status(w, r)
+		} else {
+			w.WriteHeader(405)
+			return
+		}
 	case "/ops", "/":
-		daemon.Ops(w, r)
+		if r.Method == "GET" {
+			daemon.GetOps(w, r)
+		} else if r.Method == "POST" {
+			daemon.PostOps(w, r)
+		} else {
+			w.WriteHeader(405)
+			return
+		}
 	default:
 		w.WriteHeader(404)
 	}
@@ -91,8 +102,46 @@ func (daemon *SSEDaemon) Status(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "}")
 }
 
-// Ops exposes an SSE endpoint to stream operations
-func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
+// PostOps exposes an endpoint to POST operations
+func (daemon *SSEDaemon) PostOps(w http.ResponseWriter, r *http.Request) {
+	if !checkPassword(r, daemon.IngestPassword) {
+		w.WriteHeader(401)
+		return
+	}
+
+	if r.Header.Get("Content-Type") != "application/json" {
+		w.WriteHeader(415)
+		return
+	}
+
+	h := w.Header()
+	h.Set("Server", fmt.Sprintf("oplog/%s", Version))
+	h.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	h.Set("Access-Control-Allow-Origin", "*")
+
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Warnf("HTTP ingest error reading Body: %s", err)
+		daemon.ol.Stats.EventsError.Add(1)
+		w.WriteHeader(503)
+		return
+	}
+
+	op, err := decodeOperation(body)
+	if err != nil {
+		log.Warnf("HTTP ingest invalid operation received: %s", err)
+		daemon.ol.Stats.EventsError.Add(1)
+		w.WriteHeader(503)
+		return
+	}
+
+	daemon.ol.Append(op)
+	daemon.ol.Stats.EventsReceived.Add(1)
+	w.WriteHeader(204)
+}
+
+// GetOps exposes an SSE endpoint to stream operations
+func (daemon *SSEDaemon) GetOps(w http.ResponseWriter, r *http.Request) {
 	ip := xff.GetRemoteAddr(r)
 	log.Infof("SSE[%s] connection started", ip)
 
@@ -102,7 +151,7 @@ func (daemon *SSEDaemon) Ops(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !daemon.authenticate(r) {
+	if !checkPassword(r, daemon.Password) {
 		w.WriteHeader(401)
 		return
 	}

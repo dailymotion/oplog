@@ -53,11 +53,13 @@ Available options:
 * `--mongo-url`: MongoDB URL to connect to.
 * `--object-url`: A URL template to reference objects. If this option is set, SSE events will have an "ref" field with the URL to the object. The URL should contain {{type}} and {{id}} variables (i.e.: http://api.mydomain.com/{{type}}/{{id}})
 * `--password`: Password protecting the global SSE stream.
+* `--ingest-password`: Password protecting the HTTP ingest endpoint.
 
 Available environment variables:
 
 * `OPLOGD_MONGO_URL`: See `--mongo-url`.
 * `OPLOGD_PASSWORD`: See `--password`
+* `OPLOGD_INGEST_PASSWORD`: See `--ingest-password`
 * `OPLOGD_OBJECT_URL`: See `--object-url`
 
 ## UDP API

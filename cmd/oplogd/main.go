@@ -21,6 +21,7 @@ var (
 	cappedCollectionSize = flag.Int("capped-collection-size", 1048576, "Size of the created MongoDB capped collection size in bytes (default 1MB).")
 	maxQueuedEvents      = flag.Int("max-queued-events", 100000, "Number of events to queue before starting throwing UDP messages.")
 	password             = flag.String("password", os.Getenv("OPLOGD_PASSWORD"), "Password protecting the global SSE stream.")
+	ingestPassword       = flag.String("ingest-password", os.Getenv("OPLOGD_INGEST_PASSWORD"), "Password protecting the HTTP ingest endpoint.")
 	objectURL            = flag.String("object-url", os.Getenv("OPLOGD_OBJECT_URL"), "A URL template to reference objects. If this option is set, SSE events will have an \"ref\" field with the URL to the object. The URL should contain {{type}} and {{id}} variables (i.e.: http://api.mydomain.com/{{type}}/{{id}})")
 )
 
@@ -54,5 +55,6 @@ func main() {
 
 	ssed := oplog.NewSSEDaemon(*listenAddr, ol)
 	ssed.Password = *password
+	ssed.IngestPassword = *ingestPassword
 	log.Fatal(ssed.Run())
 }
