@@ -51,6 +51,8 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 		queueSize := len(ops)
 		daemon.ol.Stats.QueueSize.Set(int64(queueSize))
 		if queueSize >= queueMaxSize {
+			// This check is preventive but racy, see select below for a non racy buffer
+			// overflow check
 			log.Warnf("UDP input queue is full, thowing message: %s", buffer[:n])
 			daemon.ol.Stats.EventsDiscarded.Add(1)
 			continue
@@ -63,7 +65,14 @@ func (daemon *UDPDaemon) Run(queueMaxSize int) error {
 			continue
 		}
 
-		daemon.ol.Stats.EventsReceived.Add(1)
-		ops <- op
+		// Append to buffered channel in a non-blocking way so we can discard operations
+		// if buffer is full.
+		select {
+		case ops <- op:
+			daemon.ol.Stats.EventsReceived.Add(1)
+		default:
+			log.Warnf("UDP input queue is full, thowing message: %s", buffer[:n])
+			daemon.ol.Stats.EventsDiscarded.Add(1)
+		}
 	}
 }
