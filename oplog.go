@@ -319,7 +319,7 @@ func (oplog *OpLog) Tail(lastID LastID, filter Filter, out chan<- GenericEvent, 
 		for {
 			var err error
 
-			if i, ok := lastID.(*OperationLastID); ok || i == nil {
+			if i, ok := lastID.(*OperationLastID); ok {
 				log.Debug("OPLOG start live updates")
 
 				query := bson.M{}
